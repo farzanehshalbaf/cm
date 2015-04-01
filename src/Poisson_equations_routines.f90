@@ -87,7 +87,7 @@ MODULE POISSON_EQUATIONS_ROUTINES
     & POISSON_EQUATION_ANALYTIC_CALCULATE, &
     & POISSON_EQUATION_EQUATIONS_SET_SUBTYPE_SET,POISSON_EQUATION_FINITE_ELEMENT_CALCULATE,POISSON_PRE_SOLVE, &
     & POISSON_EQUATION_FINITE_ELEMENT_JACOBIAN_EVALUATE,POISSON_EQUATION_FINITE_ELEMENT_RESIDUAL_EVALUATE, &
-    & POISSON_EQUATION_PROBLEM_SUBTYPE_SET,POISSON_EQUATION_PROBLEM_SETUP,POISSON_POST_SOLVE
+    & POISSON_EQUATION_PROBLEM_SUBTYPE_SET,POISSON_EQUATION_PROBLEM_SETUP,POISSON_POST_SOLVE,POISSON_PRE_SOLVE_UPDATE_INPUT_DATA
   
 CONTAINS
 
@@ -380,6 +380,12 @@ CONTAINS
       SELECT CASE(EQUATIONS_SET%SUBTYPE)
       CASE(EQUATIONS_SET_CONSTANT_SOURCE_POISSON_SUBTYPE)
         CALL POISSON_EQUATION_EQUATIONS_SET_LINEAR_SOURCE_SETUP(EQUATIONS_SET,EQUATIONS_SET_SETUP,ERR,ERROR,*999)
+!================================================================================================================================
+!================================================================================================================================
+      CASE(EQUATIONS_SET_TRANSIENT_SOURCE_POISSON_SUBTYPE)
+        CALL POISSON_EQUATION_EQUATIONS_SET_LINEAR_SOURCE_SETUP(EQUATIONS_SET,EQUATIONS_SET_SETUP,ERR,ERROR,*999)
+!================================================================================================================================
+!================================================================================================================================
       CASE(EQUATIONS_SET_EXTRACELLULAR_BIDOMAIN_POISSON_SUBTYPE)
         CALL POISSON_EQN_EQNS_SET_EXTRACELLULAR_BIDOMAIN_SETUP(EQUATIONS_SET,EQUATIONS_SET_SETUP,ERR,ERROR,*999)
       CASE(EQUATIONS_SET_LINEAR_SOURCE_POISSON_SUBTYPE)
@@ -444,6 +450,28 @@ CONTAINS
           LOCAL_ERROR="The specified solution method of "//TRIM(NUMBER_TO_VSTRING(SOLUTION_METHOD,"*",ERR,ERROR))//" is invalid."
           CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
         END SELECT
+!================================================================================================================================
+!================================================================================================================================
+      CASE(EQUATIONS_SET_TRANSIENT_SOURCE_POISSON_SUBTYPE)        
+        SELECT CASE(SOLUTION_METHOD)
+        CASE(EQUATIONS_SET_FEM_SOLUTION_METHOD)
+          EQUATIONS_SET%SOLUTION_METHOD=EQUATIONS_SET_FEM_SOLUTION_METHOD
+        CASE(EQUATIONS_SET_BEM_SOLUTION_METHOD)
+          CALL FLAG_ERROR("Not implemented.",ERR,ERROR,*999)
+        CASE(EQUATIONS_SET_FD_SOLUTION_METHOD)
+          CALL FLAG_ERROR("Not implemented.",ERR,ERROR,*999)
+        CASE(EQUATIONS_SET_FV_SOLUTION_METHOD)
+          CALL FLAG_ERROR("Not implemented.",ERR,ERROR,*999)
+        CASE(EQUATIONS_SET_GFEM_SOLUTION_METHOD)
+          CALL FLAG_ERROR("Not implemented.",ERR,ERROR,*999)
+        CASE(EQUATIONS_SET_GFV_SOLUTION_METHOD)
+          CALL FLAG_ERROR("Not implemented.",ERR,ERROR,*999)
+        CASE DEFAULT
+          LOCAL_ERROR="The specified solution method of "//TRIM(NUMBER_TO_VSTRING(SOLUTION_METHOD,"*",ERR,ERROR))//" is invalid."
+          CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+        END SELECT
+!================================================================================================================================
+!================================================================================================================================
       CASE(EQUATIONS_SET_EXTRACELLULAR_BIDOMAIN_POISSON_SUBTYPE)        
         SELECT CASE(SOLUTION_METHOD)
         CASE(EQUATIONS_SET_FEM_SOLUTION_METHOD)
@@ -561,6 +589,14 @@ CONTAINS
         EQUATIONS_SET%CLASS=EQUATIONS_SET_CLASSICAL_FIELD_CLASS
         EQUATIONS_SET%TYPE=EQUATIONS_SET_POISSON_EQUATION_TYPE
         EQUATIONS_SET%SUBTYPE=EQUATIONS_SET_CONSTANT_SOURCE_POISSON_SUBTYPE
+  !================================================================================================================================
+  !================================================================================================================================
+      CASE(EQUATIONS_SET_TRANSIENT_SOURCE_POISSON_SUBTYPE)
+        EQUATIONS_SET%CLASS=EQUATIONS_SET_CLASSICAL_FIELD_CLASS
+        EQUATIONS_SET%TYPE=EQUATIONS_SET_POISSON_EQUATION_TYPE
+        EQUATIONS_SET%SUBTYPE=EQUATIONS_SET_TRANSIENT_SOURCE_POISSON_SUBTYPE
+  !================================================================================================================================
+  !================================================================================================================================
       CASE(EQUATIONS_SET_EXTRACELLULAR_BIDOMAIN_POISSON_SUBTYPE)
         EQUATIONS_SET%CLASS=EQUATIONS_SET_CLASSICAL_FIELD_CLASS
         EQUATIONS_SET%TYPE=EQUATIONS_SET_POISSON_EQUATION_TYPE
@@ -1623,7 +1659,10 @@ CONTAINS
     
     IF(ASSOCIATED(EQUATIONS_SET)) THEN
       IF(EQUATIONS_SET%SUBTYPE==EQUATIONS_SET_CONSTANT_SOURCE_POISSON_SUBTYPE.OR. &
-        & EQUATIONS_SET%SUBTYPE==EQUATIONS_SET_LINEAR_SOURCE_POISSON_SUBTYPE) THEN
+        & EQUATIONS_SET%SUBTYPE==EQUATIONS_SET_LINEAR_SOURCE_POISSON_SUBTYPE .OR. &
+  !================================================================================================================================
+        & EQUATIONS_SET%SUBTYPE==EQUATIONS_SET_TRANSIENT_SOURCE_POISSON_SUBTYPE) THEN
+  !================================================================================================================================
         SELECT CASE(EQUATIONS_SET_SETUP%SETUP_TYPE)
         CASE(EQUATIONS_SET_SETUP_INITIAL_TYPE)
           SELECT CASE(EQUATIONS_SET_SETUP%ACTION_TYPE)
@@ -1639,6 +1678,11 @@ CONTAINS
           END SELECT
         CASE(EQUATIONS_SET_SETUP_GEOMETRY_TYPE)
           !Do nothing???
+
+          !-----------------------------------------------------------------
+          ! D e p e n d e n t   f i e l d
+          !-----------------------------------------------------------------
+
         CASE(EQUATIONS_SET_SETUP_DEPENDENT_TYPE)
           SELECT CASE(EQUATIONS_SET_SETUP%ACTION_TYPE)
           CASE(EQUATIONS_SET_SETUP_START_ACTION)
@@ -1745,6 +1789,11 @@ CONTAINS
               & " is invalid for a linear source Poisson equation"
             CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
           END SELECT
+
+          !-----------------------------------------------------------------
+          ! M a t e r i a l s   f i e l d 
+          !-----------------------------------------------------------------
+
         CASE(EQUATIONS_SET_SETUP_MATERIALS_TYPE)
           SELECT CASE(EQUATIONS_SET_SETUP%ACTION_TYPE)
           CASE(EQUATIONS_SET_SETUP_START_ACTION)
@@ -1770,7 +1819,8 @@ CONTAINS
                   & FIELD_DP_TYPE,ERR,ERROR,*999)
                 CALL FIELD_NUMBER_OF_COMPONENTS_GET(EQUATIONS_SET%GEOMETRY%GEOMETRIC_FIELD,FIELD_U_VARIABLE_TYPE, &
                   & NUMBER_OF_DIMENSIONS,ERR,ERROR,*999)
-                IF(EQUATIONS_SET%SUBTYPE==EQUATIONS_SET_CONSTANT_SOURCE_POISSON_SUBTYPE) THEN
+                IF(EQUATIONS_SET%SUBTYPE==EQUATIONS_SET_CONSTANT_SOURCE_POISSON_SUBTYPE.OR. &
+                     & EQUATIONS_SET%SUBTYPE==EQUATIONS_SET_TRANSIENT_SOURCE_POISSON_SUBTYPE) THEN
                   !Linear source.  1 for the CONSTANT source
                   !i.e., k and c in div(k.grad(u(x)))=c(x)
                   IF (NUMBER_OF_DIMENSIONS==1) THEN
@@ -1780,7 +1830,7 @@ CONTAINS
                   ELSEIF (NUMBER_OF_DIMENSIONS==3) THEN
                     NUMBER_OF_MATERIALS_COMPONENTS=7;
                   ENDIF 
-                ELSE
+                ELSEIF(EQUATIONS_SET%SUBTYPE==EQUATIONS_SET_LINEAR_SOURCE_POISSON_SUBTYPE) THEN
                   !Linear source.  2 for the linear source
                   !i.e., k and a and c in div(k.grad(u(x)))=a(x)u(x)+c(x)
                   IF (NUMBER_OF_DIMENSIONS==1) THEN
@@ -1853,7 +1903,8 @@ CONTAINS
                 !Set the default values for the materials field
                 CALL FIELD_NUMBER_OF_COMPONENTS_GET(EQUATIONS_SET%GEOMETRY%GEOMETRIC_FIELD,FIELD_U_VARIABLE_TYPE, &
                   & NUMBER_OF_DIMENSIONS,ERR,ERROR,*999)
-                IF(EQUATIONS_SET%SUBTYPE==EQUATIONS_SET_CONSTANT_SOURCE_POISSON_SUBTYPE) THEN
+                IF(EQUATIONS_SET%SUBTYPE==EQUATIONS_SET_CONSTANT_SOURCE_POISSON_SUBTYPE.OR. &
+                   & EQUATIONS_SET%SUBTYPE==EQUATIONS_SET_TRANSIENT_SOURCE_POISSON_SUBTYPE) THEN
                   IF(NUMBER_OF_DIMENSIONS==1) THEN
                     NUMBER_OF_MATERIALS_COMPONENTS=2
                   ELSEIF(NUMBER_OF_DIMENSIONS==2) THEN
@@ -1861,7 +1912,7 @@ CONTAINS
                   ELSEIF(NUMBER_OF_DIMENSIONS==3) THEN
                     NUMBER_OF_MATERIALS_COMPONENTS=7
                   ENDIF
-                ELSE
+                ELSEIF (EQUATIONS_SET%SUBTYPE==EQUATIONS_SET_LINEAR_SOURCE_POISSON_SUBTYPE) THEN
                   IF(NUMBER_OF_DIMENSIONS==1) THEN
                     NUMBER_OF_MATERIALS_COMPONENTS=3
                   ELSEIF(NUMBER_OF_DIMENSIONS==2) THEN
@@ -1885,9 +1936,15 @@ CONTAINS
               & " is invalid for a linear source Poisson equation."
             CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
           END SELECT
+
+          !-----------------------------------------------------------------
+          ! S o u r c e   f i e l d
+          !-----------------------------------------------------------------
+
         CASE(EQUATIONS_SET_SETUP_SOURCE_TYPE)
           SELECT CASE(EQUATIONS_SET%SUBTYPE)
-          CASE(EQUATIONS_SET_CONSTANT_SOURCE_POISSON_SUBTYPE,EQUATIONS_SET_LINEAR_SOURCE_POISSON_SUBTYPE)
+          CASE(EQUATIONS_SET_CONSTANT_SOURCE_POISSON_SUBTYPE,EQUATIONS_SET_LINEAR_SOURCE_POISSON_SUBTYPE, &
+               & EQUATIONS_SET_TRANSIENT_SOURCE_POISSON_SUBTYPE)
               SELECT CASE(EQUATIONS_SET_SETUP%ACTION_TYPE)
                !Set start action
                 CASE(EQUATIONS_SET_SETUP_START_ACTION)
@@ -1998,6 +2055,11 @@ CONTAINS
                 & " is invalid for a linear Poisson equation."
                CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
           END SELECT
+
+          !-----------------------------------------------------------------
+          ! A n a l y t i c   t y p e
+          !-----------------------------------------------------------------
+
         CASE(EQUATIONS_SET_SETUP_ANALYTIC_TYPE)
           SELECT CASE(EQUATIONS_SET_SETUP%ACTION_TYPE)
           CASE(EQUATIONS_SET_SETUP_START_ACTION)
@@ -3226,6 +3288,10 @@ CONTAINS
         CALL POISSON_EQUATION_PROBLEM_EXTRACELLULAR_BIDOMAIN_SETUP(PROBLEM,PROBLEM_SETUP,ERR,ERROR,*999)
       CASE(PROBLEM_LINEAR_SOURCE_POISSON_SUBTYPE)
         CALL POISSON_EQUATION_PROBLEM_LINEAR_SOURCE_SETUP(PROBLEM,PROBLEM_SETUP,ERR,ERROR,*999)
+  !================================================================================================================================
+      CASE(PROBLEM_TRANSIENT_SOURCE_POISSON_SUBTYPE)
+        CALL POISSON_EQUATION_PROBLEM_TRANSIENT_SOURCE_SETUP(PROBLEM,PROBLEM_SETUP,ERR,ERROR,*999)
+  !================================================================================================================================
       CASE(PROBLEM_LINEAR_PRESSURE_POISSON_SUBTYPE,PROBLEM_NONLINEAR_PRESSURE_POISSON_SUBTYPE, &
         & PROBLEM_FITTED_PRESSURE_POISSON_SUBTYPE,PROBLEM_ALE_PRESSURE_POISSON_SUBTYPE)
         CALL POISSON_EQUATION_PROBLEM_PRESSURE_POISSON_SETUP(PROBLEM,PROBLEM_SETUP,ERR,ERROR,*999)
@@ -3305,7 +3371,8 @@ CONTAINS
       IF(ASSOCIATED(EQUATIONS)) THEN
         SELECT CASE(EQUATIONS_SET%SUBTYPE)
         
-        CASE(EQUATIONS_SET_CONSTANT_SOURCE_POISSON_SUBTYPE)   
+        CASE(EQUATIONS_SET_CONSTANT_SOURCE_POISSON_SUBTYPE, &
+             & EQUATIONS_SET_TRANSIENT_SOURCE_POISSON_SUBTYPE)   
           !Store all these in equations matrices/somewhere else?????
           DEPENDENT_FIELD=>EQUATIONS%INTERPOLATION%DEPENDENT_FIELD
           GEOMETRIC_FIELD=>EQUATIONS%INTERPOLATION%GEOMETRIC_FIELD
@@ -4065,7 +4132,7 @@ CONTAINS
     ELSE
       CALL FLAG_ERROR("Equations set is not associated.",ERR,ERROR,*999)
     ENDIF
-
+        
     CALL EXITS("POISSON_EQUATION_FINITE_ELEMENT_CALCULATE")
     RETURN
 999 CALL ERRORS("POISSON_EQUATION_FINITE_ELEMENT_CALCULATE",ERR,ERROR)
@@ -4107,11 +4174,13 @@ CONTAINS
       IF(ASSOCIATED(EQUATIONS)) THEN
         SELECT CASE(EQUATIONS_SET%SUBTYPE)
         CASE(EQUATIONS_SET_CONSTANT_SOURCE_POISSON_SUBTYPE)
-          CALL FLAG_ERROR("Can not evaluate a Jacobian for a Poisson equation with a linear source.",ERR,ERROR,*999)
+          CALL FLAG_ERROR("Can not evaluate a Jacobian for a Poisson equation with a CONSTANT source.",ERR,ERROR,*999)
+        CASE(EQUATIONS_SET_TRANSIENT_SOURCE_POISSON_SUBTYPE)
+          CALL FLAG_ERROR("Can not evaluate a Jacobian for a Poisson equation with a TRANSIENT source.",ERR,ERROR,*999)
         CASE(EQUATIONS_SET_LINEAR_SOURCE_POISSON_SUBTYPE)
           CALL FLAG_ERROR("Can not evaluate a Jacobian for a Poisson equation with a linear source.",ERR,ERROR,*999)
         CASE(EQUATIONS_SET_EXTRACELLULAR_BIDOMAIN_POISSON_SUBTYPE)
-          CALL FLAG_ERROR("Can not evaluate a Jacobian for a Poisson equation with a linear source.",ERR,ERROR,*999)          
+          CALL FLAG_ERROR("Can not evaluate a Jacobian for a Poisson equation with a EXTRACELLULAR source.",ERR,ERROR,*999)          
         CASE(EQUATIONS_SET_QUADRATIC_SOURCE_POISSON_SUBTYPE)
           EQUATIONS_MATRICES=>EQUATIONS%EQUATIONS_MATRICES
           NONLINEAR_MATRICES=>EQUATIONS_MATRICES%NONLINEAR_MATRICES
@@ -4295,11 +4364,13 @@ CONTAINS
       IF(ASSOCIATED(EQUATIONS)) THEN
         SELECT CASE(EQUATIONS_SET%SUBTYPE)
         CASE(EQUATIONS_SET_CONSTANT_SOURCE_POISSON_SUBTYPE)
-          CALL FLAG_ERROR("Can not evaluate a residual for a Poisson equation with a linear source.",ERR,ERROR,*999)
+          CALL FLAG_ERROR("Can not evaluate a residual for a Poisson equation with a CONSTANT source.",ERR,ERROR,*999)
+        CASE(EQUATIONS_SET_TRANSIENT_SOURCE_POISSON_SUBTYPE)
+          CALL FLAG_ERROR("Can not evaluate a Jacobian for a Poisson equation with a TRANSIENT source.",ERR,ERROR,*999)
         CASE(EQUATIONS_SET_LINEAR_SOURCE_POISSON_SUBTYPE)
           CALL FLAG_ERROR("Can not evaluate a residual for a Poisson equation with a linear source.",ERR,ERROR,*999)
         CASE(EQUATIONS_SET_EXTRACELLULAR_BIDOMAIN_POISSON_SUBTYPE)
-          CALL FLAG_ERROR("Can not evaluate a residual for a Poisson equation with a linear source.",ERR,ERROR,*999)          
+          CALL FLAG_ERROR("Can not evaluate a residual for a Poisson equation with a EXTRACELLULAR source.",ERR,ERROR,*999)          
         CASE(EQUATIONS_SET_QUADRATIC_SOURCE_POISSON_SUBTYPE)                 
           !Store all these in equations matrices/somewhere else?????
           DEPENDENT_FIELD=>EQUATIONS%INTERPOLATION%DEPENDENT_FIELD
@@ -4574,7 +4645,11 @@ CONTAINS
       CASE(PROBLEM_LINEAR_SOURCE_POISSON_SUBTYPE)        
         PROBLEM%CLASS=PROBLEM_CLASSICAL_FIELD_CLASS
         PROBLEM%TYPE=PROBLEM_POISSON_EQUATION_TYPE
-        PROBLEM%SUBTYPE=PROBLEM_LINEAR_SOURCE_POISSON_SUBTYPE     
+        PROBLEM%SUBTYPE=PROBLEM_LINEAR_SOURCE_POISSON_SUBTYPE
+      CASE(PROBLEM_TRANSIENT_SOURCE_POISSON_SUBTYPE)        
+        PROBLEM%CLASS=PROBLEM_CLASSICAL_FIELD_CLASS
+        PROBLEM%TYPE=PROBLEM_POISSON_EQUATION_TYPE
+        PROBLEM%SUBTYPE=PROBLEM_TRANSIENT_SOURCE_POISSON_SUBTYPE     
       CASE(PROBLEM_NONLINEAR_SOURCE_POISSON_SUBTYPE)        
         PROBLEM%CLASS=PROBLEM_CLASSICAL_FIELD_CLASS
         PROBLEM%TYPE=PROBLEM_POISSON_EQUATION_TYPE
@@ -4615,7 +4690,7 @@ CONTAINS
   !================================================================================================================================
   !
 
-  !>Sets up the linear source Poisson equations problem.
+  !>Sets up the EXTRACELLULAR_BIDOMAIN source Poisson equations problem.
   SUBROUTINE POISSON_EQUATION_PROBLEM_EXTRACELLULAR_BIDOMAIN_SETUP(PROBLEM,PROBLEM_SETUP,ERR,ERROR,*)
 
     !Argument variables
@@ -4878,7 +4953,141 @@ CONTAINS
   END SUBROUTINE POISSON_EQUATION_PROBLEM_LINEAR_SOURCE_SETUP
 
 
-  !
+  !================================================================================================================================
+  !>Sets up the transinet source Poisson equations problem.
+
+  SUBROUTINE POISSON_EQUATION_PROBLEM_TRANSIENT_SOURCE_SETUP(PROBLEM,PROBLEM_SETUP,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(PROBLEM_TYPE), POINTER :: PROBLEM !<A pointer to the problem to setup
+    TYPE(PROBLEM_SETUP_TYPE), INTENT(INOUT) :: PROBLEM_SETUP !<The problem setup information
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(CONTROL_LOOP_TYPE), POINTER :: CONTROL_LOOP,CONTROL_LOOP_ROOT
+    TYPE(SOLVER_TYPE), POINTER :: SOLVER
+    TYPE(SOLVER_EQUATIONS_TYPE), POINTER :: SOLVER_EQUATIONS
+    TYPE(SOLVERS_TYPE), POINTER :: SOLVERS
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+   
+    CALL ENTERS("POISSON_EQUATION_PROBLEM_TRANSIENT_SOURCE_SETUP",ERR,ERROR,*999)
+
+    NULLIFY(CONTROL_LOOP)
+    NULLIFY(SOLVER)
+    NULLIFY(SOLVER_EQUATIONS)
+    NULLIFY(SOLVERS)
+
+    IF(ASSOCIATED(PROBLEM)) THEN
+      IF(PROBLEM%SUBTYPE==PROBLEM_TRANSIENT_SOURCE_POISSON_SUBTYPE) THEN
+        SELECT CASE(PROBLEM_SETUP%SETUP_TYPE)
+        CASE(PROBLEM_SETUP_INITIAL_TYPE)
+          SELECT CASE(PROBLEM_SETUP%ACTION_TYPE)
+          CASE(PROBLEM_SETUP_START_ACTION)
+            !Do nothing????
+          CASE(PROBLEM_SETUP_FINISH_ACTION)
+            !Do nothing????
+          CASE DEFAULT
+            LOCAL_ERROR="The action type of "//TRIM(NUMBER_TO_VSTRING(PROBLEM_SETUP%ACTION_TYPE,"*",ERR,ERROR))// &
+              & " for a setup type of "//TRIM(NUMBER_TO_VSTRING(PROBLEM_SETUP%SETUP_TYPE,"*",ERR,ERROR))// &
+              & " is invalid for a transient source Poisson equation."
+            CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+          END SELECT
+        CASE(PROBLEM_SETUP_CONTROL_TYPE)
+          SELECT CASE(PROBLEM_SETUP%ACTION_TYPE)
+          CASE(PROBLEM_SETUP_START_ACTION)
+            !Set up a simple control loop
+            CALL CONTROL_LOOP_CREATE_START(PROBLEM,CONTROL_LOOP,ERR,ERROR,*999)
+          CASE(PROBLEM_SETUP_FINISH_ACTION)
+            !Finish the control loops
+            CONTROL_LOOP_ROOT=>PROBLEM%CONTROL_LOOP
+            CALL CONTROL_LOOP_GET(CONTROL_LOOP_ROOT,CONTROL_LOOP_NODE,CONTROL_LOOP,ERR,ERROR,*999)
+            CALL CONTROL_LOOP_CREATE_FINISH(CONTROL_LOOP,ERR,ERROR,*999)            
+          CASE DEFAULT
+            LOCAL_ERROR="The action type of "//TRIM(NUMBER_TO_VSTRING(PROBLEM_SETUP%ACTION_TYPE,"*",ERR,ERROR))// &
+              & " for a setup type of "//TRIM(NUMBER_TO_VSTRING(PROBLEM_SETUP%SETUP_TYPE,"*",ERR,ERROR))// &
+              & " is invalid for a transient source Poisson equation."
+            CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+          END SELECT
+        CASE(PROBLEM_SETUP_SOLVERS_TYPE)
+          !Get the control loop
+          CONTROL_LOOP_ROOT=>PROBLEM%CONTROL_LOOP
+          CALL CONTROL_LOOP_GET(CONTROL_LOOP_ROOT,CONTROL_LOOP_NODE,CONTROL_LOOP,ERR,ERROR,*999)
+          SELECT CASE(PROBLEM_SETUP%ACTION_TYPE)
+          CASE(PROBLEM_SETUP_START_ACTION)
+            !Start the solvers creation
+            CALL SOLVERS_CREATE_START(CONTROL_LOOP,SOLVERS,ERR,ERROR,*999)
+            CALL SOLVERS_NUMBER_SET(SOLVERS,1,ERR,ERROR,*999)
+            !Set the solver to be a first order dynamic solver 
+            CALL SOLVERS_SOLVER_GET(SOLVERS,1,SOLVER,ERR,ERROR,*999)
+            CALL SOLVER_TYPE_SET(SOLVER,SOLVER_DYNAMIC_TYPE,ERR,ERROR,*999)
+            CALL SOLVER_DYNAMIC_LINEARITY_TYPE_SET(SOLVER,SOLVER_DYNAMIC_LINEAR,ERR,ERROR,*999)
+            CALL SOLVER_DYNAMIC_ORDER_SET(SOLVER,SOLVER_DYNAMIC_FIRST_ORDER,ERR,ERROR,*999)
+            !Set solver defaults
+            CALL SOLVER_DYNAMIC_DEGREE_SET(SOLVER,SOLVER_DYNAMIC_FIRST_DEGREE,ERR,ERROR,*999)
+            CALL SOLVER_DYNAMIC_SCHEME_SET(SOLVER,SOLVER_DYNAMIC_CRANK_NICOLSON_SCHEME,ERR,ERROR,*999)
+            CALL SOLVER_LIBRARY_TYPE_SET(SOLVER,SOLVER_CMISS_LIBRARY,ERR,ERROR,*999)
+          CASE(PROBLEM_SETUP_FINISH_ACTION)
+            !Get the solvers
+            CALL CONTROL_LOOP_SOLVERS_GET(CONTROL_LOOP,SOLVERS,ERR,ERROR,*999)
+            !Finish the solvers creation
+            CALL SOLVERS_CREATE_FINISH(SOLVERS,ERR,ERROR,*999)
+          CASE DEFAULT
+            LOCAL_ERROR="The action type of "//TRIM(NUMBER_TO_VSTRING(PROBLEM_SETUP%ACTION_TYPE,"*",ERR,ERROR))// &
+              & " for a setup type of "//TRIM(NUMBER_TO_VSTRING(PROBLEM_SETUP%SETUP_TYPE,"*",ERR,ERROR))// &
+              & " is invalid for a transient Navier-Stokes fluid."
+            CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+          END SELECT
+        CASE(PROBLEM_SETUP_SOLVER_EQUATIONS_TYPE)
+          SELECT CASE(PROBLEM_SETUP%ACTION_TYPE)
+          CASE(PROBLEM_SETUP_START_ACTION)
+            !Get the control loop
+            CONTROL_LOOP_ROOT=>PROBLEM%CONTROL_LOOP
+            CALL CONTROL_LOOP_GET(CONTROL_LOOP_ROOT,CONTROL_LOOP_NODE,CONTROL_LOOP,ERR,ERROR,*999)
+            !Get the solver
+            CALL CONTROL_LOOP_SOLVERS_GET(CONTROL_LOOP,SOLVERS,ERR,ERROR,*999)
+            CALL SOLVERS_SOLVER_GET(SOLVERS,1,SOLVER,ERR,ERROR,*999)
+            !Create the solver equations
+            CALL SOLVER_EQUATIONS_CREATE_START(SOLVER,SOLVER_EQUATIONS,ERR,ERROR,*999)
+            CALL SOLVER_EQUATIONS_LINEARITY_TYPE_SET(SOLVER_EQUATIONS,SOLVER_EQUATIONS_LINEAR,ERR,ERROR,*999)
+            CALL SOLVER_EQUATIONS_TIME_DEPENDENCE_TYPE_SET(SOLVER_EQUATIONS,SOLVER_EQUATIONS_FIRST_ORDER_DYNAMIC,&
+              & ERR,ERROR,*999)
+            CALL SOLVER_EQUATIONS_SPARSITY_TYPE_SET(SOLVER_EQUATIONS,SOLVER_SPARSE_MATRICES,ERR,ERROR,*999)
+          CASE(PROBLEM_SETUP_FINISH_ACTION)
+            !Get the control loop
+            CONTROL_LOOP_ROOT=>PROBLEM%CONTROL_LOOP
+            CALL CONTROL_LOOP_GET(CONTROL_LOOP_ROOT,CONTROL_LOOP_NODE,CONTROL_LOOP,ERR,ERROR,*999)
+            !Get the solver equations
+            CALL CONTROL_LOOP_SOLVERS_GET(CONTROL_LOOP,SOLVERS,ERR,ERROR,*999)
+            CALL SOLVERS_SOLVER_GET(SOLVERS,1,SOLVER,ERR,ERROR,*999)
+            CALL SOLVER_SOLVER_EQUATIONS_GET(SOLVER,SOLVER_EQUATIONS,ERR,ERROR,*999)
+            !Finish the solver equations creation
+            CALL SOLVER_EQUATIONS_CREATE_FINISH(SOLVER_EQUATIONS,ERR,ERROR,*999)
+          CASE DEFAULT
+            LOCAL_ERROR="The action type of "//TRIM(NUMBER_TO_VSTRING(PROBLEM_SETUP%ACTION_TYPE,"*",ERR,ERROR))// &
+              & " for a setup type of "//TRIM(NUMBER_TO_VSTRING(PROBLEM_SETUP%SETUP_TYPE,"*",ERR,ERROR))// &
+              & " is invalid for a transient source Poisson equation."
+            CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+          END SELECT
+        CASE DEFAULT
+          LOCAL_ERROR="The setup type of "//TRIM(NUMBER_TO_VSTRING(PROBLEM_SETUP%SETUP_TYPE,"*",ERR,ERROR))// &
+            & " is invalid for a transient source Poisson equation."
+          CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+        END SELECT
+      ELSE
+        LOCAL_ERROR="The problem subtype of "//TRIM(NUMBER_TO_VSTRING(PROBLEM%SUBTYPE,"*",ERR,ERROR))// &
+          & " does not equal a linear source Poisson equation subtype."
+        CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+      ENDIF
+    ELSE
+      CALL FLAG_ERROR("Problem is not associated.",ERR,ERROR,*999)
+    ENDIF
+       
+    CALL EXITS("POISSON_EQUATION_PROBLEM_TRANSIENT_SOURCE_SETUP")
+    RETURN
+999 CALL ERRORS("POISSON_EQUATION_PROBLEM_TRANSIENT_SOURCE_SETUP",ERR,ERROR)
+    CALL EXITS("POISSON_EQUATION_PROBLEM_TRANSIENT_SOURCE_SETUP")
+    RETURN 1
+  END SUBROUTINE POISSON_EQUATION_PROBLEM_TRANSIENT_SOURCE_SETUP
   !================================================================================================================================
   !
 
@@ -5300,6 +5509,8 @@ CONTAINS
 !               do nothing          
             CASE(PROBLEM_LINEAR_SOURCE_POISSON_SUBTYPE)
 !               do nothing
+            CASE(PROBLEM_TRANSIENT_SOURCE_POISSON_SUBTYPE)
+              CALL POISSON_POST_SOLVE_OUTPUT_DATA(CONTROL_LOOP,SOLVER,ERR,ERROR,*999)
             CASE(PROBLEM_NONLINEAR_SOURCE_POISSON_SUBTYPE)
 !               do nothing
             CASE(PROBLEM_LINEAR_PRESSURE_POISSON_SUBTYPE,PROBLEM_NONLINEAR_PRESSURE_POISSON_SUBTYPE, &
@@ -5364,6 +5575,9 @@ CONTAINS
       IF(ASSOCIATED(SOLVER)) THEN
         IF(ASSOCIATED(CONTROL_LOOP%PROBLEM)) THEN
           SELECT CASE(CONTROL_LOOP%PROBLEM%SUBTYPE)
+            CASE(PROBLEM_TRANSIENT_SOURCE_POISSON_SUBTYPE)
+              CALL POISSON_PRE_SOLVE_UPDATE_BC(CONTROL_LOOP,SOLVER,ERR,ERROR,*999)
+               !CALL POISSON_PRE_SOLVE_UPDATE_INPUT_DATA(CONTROL_LOOP,SOLVER,ERR,ERROR,*999)
             CASE(PROBLEM_EXTRACELLULAR_BIDOMAIN_POISSON_SUBTYPE)
 !               do nothing          
             CASE(PROBLEM_LINEAR_SOURCE_POISSON_SUBTYPE)
@@ -5479,27 +5693,43 @@ CONTAINS
     !Argument variables
     TYPE(CONTROL_LOOP_TYPE), POINTER :: CONTROL_LOOP !<A pointer to the control loop to solve.
     TYPE(SOLVER_TYPE), POINTER :: SOLVER !<A pointer to the solver
-    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
     TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
     !Local Variables
     TYPE(SOLVER_EQUATIONS_TYPE), POINTER :: SOLVER_EQUATIONS  !<A pointer to the solver equations
     TYPE(SOLVER_MAPPING_TYPE), POINTER :: SOLVER_MAPPING !<A pointer to the solver mapping
     TYPE(EQUATIONS_SET_TYPE), POINTER :: EQUATIONS_SET !<A pointer to the equations set
     TYPE(EQUATIONS_TYPE), POINTER :: EQUATIONS
+    TYPE(FIELD_TYPE), POINTER :: equationsSetField,DEPENDENT_FIELD 
     TYPE(VARYING_STRING) :: LOCAL_ERROR
-
-    REAL(DP) :: CURRENT_TIME,TIME_INCREMENT
-
-    INTEGER(INTG) :: NUMBER_OF_DIMENSIONS,CURRENT_LOOP_ITERATION
-    INTEGER(INTG) :: INPUT_TYPE,INPUT_OPTION
-    REAL(DP), POINTER :: INPUT_VEL_NEW_DATA(:),INPUT_VEL_OLD_DATA(:)
-    REAL(DP), POINTER :: INPUT_VEL_LABEL_DATA(:),INPUT_VEL_U_DATA(:),INPUT_VEL_V_DATA(:),INPUT_VEL_W_DATA(:)
+    TYPE(FIELD_VARIABLE_TYPE), POINTER :: fieldVariable,dependentFieldVariable
+    TYPE(BOUNDARY_CONDITIONS_TYPE), POINTER :: boundaryConditions
+    TYPE(BOUNDARY_CONDITIONS_VARIABLE_TYPE), POINTER :: BOUNDARY_CONDITIONS_VARIABLE
+    TYPE(DOMAIN_TYPE), POINTER :: DOMAIN
+    TYPE(DOMAIN_NODES_TYPE), POINTER :: DOMAIN_NODES
     TYPE(CONTROL_LOOP_TYPE), POINTER :: CONTROL_TIME_LOOP !<A pointer to the control loop to solve.
 
-    LOGICAL :: BOUNDARY_UPDATE
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    INTEGER(INTG) :: nodeIdx,componentIdx
+    INTEGER(INTG) :: numberOfNodes,numberOfGlobalNodes,currentLoopIteration
+    INTEGER(INTG) :: NUMBER_OF_DIMENSIONS,CURRENT_LOOP_ITERATION,userNodeNumber
+    INTEGER(INTG) :: INPUT_TYPE,INPUT_OPTION,localNodeNumber,dependentDof
+    INTEGER(INTG) :: localDof,globalDof,BOUNDARY_CONDITION_CHECK_VARIABLE,dependentVariableType
 
+    REAL(DP) :: CURRENT_TIME,TIME_INCREMENT,VALUE
+    REAL(DP), ALLOCATABLE :: nodeData(:,:)
+    REAL(DP), POINTER :: INPUT_VEL_NEW_DATA(:),INPUT_VEL_OLD_DATA(:)
+    REAL(DP), POINTER :: INPUT_VEL_LABEL_DATA(:),INPUT_VEL_U_DATA(:),INPUT_VEL_V_DATA(:),INPUT_VEL_W_DATA(:)
+    
+    CHARACTER(41) :: inputFile,tempString
+    LOGICAL :: BOUNDARY_UPDATE,ghostNode,nodeExists,importDataFromFile
     BOUNDARY_UPDATE=.FALSE.
 
+    NULLIFY(SOLVER_EQUATIONS)
+    NULLIFY(SOLVER_MAPPING)
+    NULLIFY(EQUATIONS_SET)
+    NULLIFY(EQUATIONS)
+    NULLIFY(dependentFieldVariable)
+    NULLIFY(DEPENDENT_FIELD)
     CALL ENTERS("POISSON_PRE_SOLVE_UPDATE_INPUT_DATA",ERR,ERROR,*999)
 
     IF(ASSOCIATED(CONTROL_LOOP)) THEN
@@ -5512,6 +5742,9 @@ CONTAINS
 !               do nothing
           CASE(PROBLEM_NONLINEAR_SOURCE_POISSON_SUBTYPE)
 !               do nothing
+          CASE(PROBLEM_TRANSIENT_SOURCE_POISSON_SUBTYPE)
+ !               do nothing           
+
           CASE(PROBLEM_FITTED_PRESSURE_POISSON_SUBTYPE)
             IF(SOLVER%GLOBAL_NUMBER==1) THEN
               !only read in data if it is the fitting problem
@@ -5694,6 +5927,132 @@ CONTAINS
   !
   !================================================================================================================================
   !
+  !Update the boundary conditions FOR TRANSIENT SOURCE POISSON
+  SUBROUTINE POISSON_PRE_SOLVE_UPDATE_BC(CONTROL_LOOP,SOLVER,ERR,ERROR,*)
+    !Argument variables
+    TYPE(CONTROL_LOOP_TYPE), POINTER :: CONTROL_LOOP !<A pointer to the control loop to solve.
+    TYPE(SOLVER_TYPE), POINTER :: SOLVER !<A pointer to the solver
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(SOLVER_EQUATIONS_TYPE), POINTER :: SOLVER_EQUATIONS  !<A pointer to the solver equations
+    TYPE(SOLVER_MAPPING_TYPE), POINTER :: SOLVER_MAPPING !<A pointer to the solver mapping
+    TYPE(EQUATIONS_SET_TYPE), POINTER :: EQUATIONS_SET !<A pointer to the equations set
+    TYPE(EQUATIONS_TYPE), POINTER :: EQUATIONS
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+    TYPE(BOUNDARY_CONDITIONS_VARIABLE_TYPE), POINTER :: BOUNDARY_CONDITIONS_VARIABLE
+    TYPE(BOUNDARY_CONDITIONS_TYPE), POINTER :: BOUNDARY_CONDITIONS
+    TYPE(FIELD_TYPE), POINTER :: DEPENDENT_FIELD
+    TYPE(FIELD_VARIABLE_TYPE), POINTER :: FIELD_VARIABLE
+    REAL(DP) :: CURRENT_TIME,TIME_INCREMENT
+
+!\todo: Reduce number of variable used
+    INTEGER(INTG) :: BOUNDARY_CONDITION_CHECK_VARIABLE,node_idx
+    INTEGER(INTG) :: NUMBER_OF_COMPONENTS
+    INTEGER(INTG) :: local_ny,global_ny
+    REAL(DP), POINTER :: BOUNDARY_VALUES(:)
+    INTEGER(INTG), POINTER :: BOUNDARY_NODES(:)
+
+    CALL ENTERS("POISSON_PRE_SOLVE_UPDATE_BC",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(CONTROL_LOOP)) THEN
+      CALL CONTROL_LOOP_CURRENT_TIMES_GET(CONTROL_LOOP,CURRENT_TIME,TIME_INCREMENT,ERR,ERROR,*999)
+      WRITE (*,*) CONTROL_LOOP%TIME_LOOP%ITERATION_NUMBER
+      IF(ASSOCIATED(SOLVER)) THEN
+        IF(ASSOCIATED(CONTROL_LOOP%PROBLEM)) THEN
+          SELECT CASE(CONTROL_LOOP%PROBLEM%SUBTYPE)
+          CASE (PROBLEM_TRANSIENT_SOURCE_POISSON_SUBTYPE)
+          SOLVER_EQUATIONS=>SOLVER%SOLVER_EQUATIONS
+          IF(ASSOCIATED(SOLVER_EQUATIONS)) THEN
+            SOLVER_MAPPING=>SOLVER_EQUATIONS%SOLVER_MAPPING
+            EQUATIONS=>SOLVER_MAPPING%EQUATIONS_SET_TO_SOLVER_MAP(1)%EQUATIONS
+            IF(ASSOCIATED(EQUATIONS)) THEN
+              EQUATIONS_SET=>EQUATIONS%EQUATIONS_SET
+              IF(ASSOCIATED(EQUATIONS_SET)) THEN
+                BOUNDARY_CONDITIONS=>SOLVER_EQUATIONS%BOUNDARY_CONDITIONS
+                IF(ASSOCIATED(BOUNDARY_CONDITIONS)) THEN
+                  DEPENDENT_FIELD=>EQUATIONS_SET%DEPENDENT%DEPENDENT_FIELD
+                  IF(ASSOCIATED(DEPENDENT_FIELD)) THEN
+                    CALL FIELD_VARIABLE_GET(DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE,FIELD_VARIABLE,ERR,ERROR,*999)
+                    IF(ASSOCIATED(FIELD_VARIABLE)) THEN
+                      CALL BOUNDARY_CONDITIONS_VARIABLE_GET(BOUNDARY_CONDITIONS,FIELD_VARIABLE,BOUNDARY_CONDITIONS_VARIABLE, &
+                        & ERR,ERROR,*999)
+                      IF(ASSOCIATED(BOUNDARY_CONDITIONS_VARIABLE)) THEN
+                        CALL FIELD_NUMBER_OF_COMPONENTS_GET(EQUATIONS_SET%DEPENDENT%DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &
+                         & NUMBER_OF_COMPONENTS,ERR,ERROR,*999)
+                        NULLIFY(BOUNDARY_VALUES)
+                        NULLIFY(BOUNDARY_NODES)
+                        CALL FLUID_MECHANICS_IO_READ_BOUNDARY_CONDITIONS_ITERATION(SOLVER_LINEAR_TYPE,BOUNDARY_VALUES, &
+                          & BOUNDARY_NODES,NUMBER_OF_COMPONENTS, &
+                          & BOUNDARY_CONDITION_NEUMANN_INTEGRATED,CONTROL_LOOP%TIME_LOOP%INPUT_NUMBER, &
+                          & CONTROL_LOOP%TIME_LOOP%ITERATION_NUMBER)
+                        WRITE(*,*) SIZE(BOUNDARY_VALUES)
+                        DO node_idx=1,SIZE(BOUNDARY_VALUES)
+                          !Default to version 1 of each node derivative
+                          CALL FIELD_COMPONENT_DOF_GET_USER_NODE(EQUATIONS_SET%DEPENDENT%DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &
+                            & 1,NO_GLOBAL_DERIV,BOUNDARY_NODES(node_idx), &
+                            & 1,local_ny,global_ny,ERR,ERROR,*999)
+                          BOUNDARY_CONDITION_CHECK_VARIABLE=BOUNDARY_CONDITIONS_VARIABLE% &
+                            & CONDITION_TYPES(local_ny)
+                          IF(BOUNDARY_CONDITION_CHECK_VARIABLE==BOUNDARY_CONDITION_FIXED) THEN
+                            CALL FIELD_PARAMETER_SET_UPDATE_LOCAL_DOF(EQUATIONS_SET%DEPENDENT%DEPENDENT_FIELD, &
+                              & FIELD_U_VARIABLE_TYPE,FIELD_VALUES_SET_TYPE,local_ny, &
+                              & BOUNDARY_VALUES(node_idx),ERR,ERROR,*999)
+                          END IF
+                        ENDDO
+                      ELSE
+                        CALL FLAG_ERROR("Boundary condition variable is not associated.",ERR,ERROR,*999)
+                      END IF
+                    ELSE
+                      CALL FLAG_ERROR("Dependent field variable is not associated.",ERR,ERROR,*999)
+                    END IF
+                  ELSE
+                    CALL FLAG_ERROR("Equations set dependent variable is not associated.",ERR,ERROR,*999)
+                  END IF
+                ELSE
+                  CALL FLAG_ERROR("Boundary conditions are not associated.",ERR,ERROR,*999)
+                END IF
+              ELSE
+                CALL FLAG_ERROR("Equations set is not associated.",ERR,ERROR,*999)
+              END IF
+            ELSE
+              CALL FLAG_ERROR("Equations are not associated.",ERR,ERROR,*999)
+            END IF
+          ELSE
+            CALL FLAG_ERROR("Solver equations are not associated.",ERR,ERROR,*999)
+          END IF
+          CALL FIELD_PARAMETER_SET_UPDATE_START(EQUATIONS_SET%DEPENDENT%DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, & 
+            & FIELD_VALUES_SET_TYPE,ERR,ERROR,*999)
+          CALL FIELD_PARAMETER_SET_UPDATE_FINISH(EQUATIONS_SET%DEPENDENT%DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, & 
+            & FIELD_VALUES_SET_TYPE,ERR,ERROR,*999)
+          CASE DEFAULT
+            LOCAL_ERROR="Problem subtype "//TRIM(NUMBER_TO_VSTRING(CONTROL_LOOP%PROBLEM%SUBTYPE,"*",ERR,ERROR))// &
+              & " is not valid for an POISSON equation of a classical field problem class."
+          CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+          END SELECT
+        ELSE
+          CALL FLAG_ERROR("Problem is not associated.",ERR,ERROR,*999)
+        ENDIF
+      ELSE
+        CALL FLAG_ERROR("Solver is not associated.",ERR,ERROR,*999)
+      ENDIF
+    ELSE
+      CALL FLAG_ERROR("Control loop is not associated.",ERR,ERROR,*999)
+    ENDIF
+
+    CALL EXITS("POISSON_PRE_SOLVE_UPDATE_BC")
+    RETURN
+999 CALL ERRORS("POISSON_PRE_SOLVE_UPDATE_BC",ERR,ERROR)
+    CALL EXITS("POISSON_PRE_SOLVE_UPDATE_BC")
+    RETURN 1
+
+  END SUBROUTINE POISSON_PRE_SOLVE_UPDATE_BC
+
+  !
+  !================================================================================================================================
+  !
+
+
 
   !>Output data post solve
   SUBROUTINE POISSON_POST_SOLVE_OUTPUT_DATA(CONTROL_LOOP,SOLVER,ERR,ERROR,*)
@@ -5731,7 +6090,7 @@ CONTAINS
             CASE(PROBLEM_NONLINEAR_SOURCE_POISSON_SUBTYPE)
 !               do nothing
             CASE(PROBLEM_LINEAR_PRESSURE_POISSON_SUBTYPE,PROBLEM_NONLINEAR_PRESSURE_POISSON_SUBTYPE, &
-              & PROBLEM_ALE_PRESSURE_POISSON_SUBTYPE)
+              & PROBLEM_ALE_PRESSURE_POISSON_SUBTYPE,PROBLEM_TRANSIENT_SOURCE_POISSON_SUBTYPE)
               IF(CONTROL_LOOP%WHILE_LOOP%ITERATION_NUMBER==CONTROL_LOOP%WHILE_LOOP%MAXIMUM_NUMBER_OF_ITERATIONS)THEN
                 CONTROL_TIME_LOOP=>CONTROL_LOOP%PARENT_LOOP
                 CALL CONTROL_LOOP_CURRENT_TIMES_GET(CONTROL_TIME_LOOP,CURRENT_TIME,TIME_INCREMENT,ERR,ERROR,*999)
