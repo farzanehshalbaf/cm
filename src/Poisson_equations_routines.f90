@@ -5883,6 +5883,9 @@ CONTAINS
                            & NUMBER_OF_COMPONENTS,ERR,ERROR,*999)
                           NULLIFY(BOUNDARY_VALUES)
                           NULLIFY(BOUNDARY_NODES)
+                          !CALL FLUID_MECHANICS_IO_READ_BOUNDARY_CONDITIONS_ITERATION(SOLVER_LINEAR_TYPE,BOUNDARY_VALUES, &
+                          !  & BOUNDARY_NODES,NUMBER_OF_COMPONENTS,BOUNDARY_CONDITION_FIXED,CONTROL_LOOP%TIME_LOOP%INPUT_NUMBER, &
+                          !  & CONTROL_LOOP%TIME_LOOP%ITERATION_NUMBER)
                           WRITE(INPUT_FILE,'("./input/BC/BC_VALUES_",I0,".dat")') ITERATION
                           OPEN(UNIT=1, FILE=INPUT_FILE,STATUS='unknown')
                           READ(1,*) NUM_BC_NODES
@@ -5902,20 +5905,16 @@ CONTAINS
                           CALL WRITE_STRING(GENERAL_OUTPUT_TYPE,"  the number of boundary values that needs to be updated is ", &
                             & ERR,ERROR,*999)
                           WRITE(*,*) SIZE(BOUNDARY_VALUES)
-                          DO node_idx=1,SIZE(BOUNDARY_VALUES)
-                            !Default to version 1 of each node derivative
-                            CALL FIELD_COMPONENT_DOF_GET_USER_NODE(EQUATIONS_SET%DEPENDENT%DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &
-                              & 1,NO_GLOBAL_DERIV,BOUNDARY_NODES(node_idx), &
-                              & 1,local_ny,global_ny,ERR,ERROR,*999)
-                            BOUNDARY_CONDITION_CHECK_VARIABLE=BOUNDARY_CONDITIONS_VARIABLE% &
-                              & CONDITION_TYPES(local_ny)
-                            IF(BOUNDARY_CONDITION_CHECK_VARIABLE==BOUNDARY_CONDITION_FIXED) THEN
-                              CALL FIELD_PARAMETER_SET_UPDATE_LOCAL_DOF(EQUATIONS_SET%DEPENDENT%DEPENDENT_FIELD, &
-                                & FIELD_U_VARIABLE_TYPE,FIELD_VALUES_SET_TYPE,local_ny, &
-                                & BOUNDARY_VALUES(node_idx),ERR,ERROR,*999)
-                            ELSE
-                              CALL FLAG_ERROR("Boundary condition is not fixed type and cannot be associated.",ERR,ERROR,*999)
-                            END IF
+                          DO node_idx=1,SIZE(BOUNDARY_NODES)
+                          CALL FIELD_COMPONENT_DOF_GET_USER_NODE(EQUATIONS_SET%DEPENDENT%DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &
+                            & 1,NO_GLOBAL_DERIV,BOUNDARY_NODES(node_idx), &
+                            & 1,local_ny,global_ny,ERR,ERROR,*999)
+                            CALL FIELD_PARAMETER_SET_UPDATE_LOCAL_DOF(EQUATIONS_SET%DEPENDENT%DEPENDENT_FIELD, &
+                              & FIELD_U_VARIABLE_TYPE,FIELD_VALUES_SET_TYPE,local_ny, &
+                              & BOUNDARY_VALUES(node_idx),ERR,ERROR,*999)
+                          !UPDATE THE VALUE OF PHI FOR  FIRST VERSION, FIRST DERIVATIVE, FIRST COMPONENT 
+                          !  CALL FIELD_PARAMETER_SET_UPDATE_NODE(DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &  
+                           !   & FIELD_VALUES_SET_TYPE,1,1,BOUNDARY_NODES(I),1,BOUNDARY_VALUES(I),ERR,ERROR,*999)
                           ENDDO
                         ELSE
                           CALL FLAG_ERROR("Boundary condition variable is not associated.",ERR,ERROR,*999)
@@ -6053,8 +6052,8 @@ CONTAINS
     TYPE(CONTROL_LOOP_TYPE), POINTER :: TIME_LOOP !<A pointer to the control time loop.
     LOGICAL :: EXPORT_FIELD,UPDATE_MATRIX
     TYPE(VARYING_STRING) :: METHOD!,FILE
-    CHARACTER(14) :: FILE
-    CHARACTER(14) :: OUTPUT_FILE
+    CHARACTER(20) :: FILE
+    CHARACTER(80086592) :: OUTPUT_FILE
     INTEGER(INTG) :: FileNameLength
     TYPE(VARYING_STRING) :: VFileName
     TYPE(VARYING_STRING) :: FILENAME
@@ -6148,20 +6147,28 @@ CONTAINS
                       FILE=OUTPUT_FILE
                       METHOD="FORTRAN"
                       EXPORT_FIELD=.TRUE.
-                      IF(EXPORT_FIELD) THEN
-                        !IF(OUTPUT_ITERATION_NUMBER/=0.AND.MOD(CURRENT_LOOP_ITERATION,OUTPUT_ITERATION_NUMBER)==0)  THEN
-                          IF(SOLVER%OUTPUT_TYPE>=SOLVER_PROGRESS_OUTPUT) THEN
-                            CALL WRITE_STRING(GENERAL_OUTPUT_TYPE,"Quastatic Poisson exports fields ...",ERR,ERROR,*999)
-                            CALL WRITE_STRING(GENERAL_OUTPUT_TYPE,OUTPUT_FILE,ERR,ERROR,*999)
-                          ENDIF
-                          CALL FLUID_MECHANICS_IO_WRITE_CMGUI(EQUATIONS_SET%REGION,EQUATIONS_SET%GLOBAL_NUMBER,FILE, &
-                            & ERR,ERROR,*999)
-                          IF(SOLVER%OUTPUT_TYPE>=SOLVER_PROGRESS_OUTPUT) THEN
-                            CALL WRITE_STRING(GENERAL_OUTPUT_TYPE,"Quastatic Poisson all fields exported ...",ERR,ERROR,*999)
-                          ENDIF
-                          CALL WRITE_STRING(DIAGNOSTIC_OUTPUT_TYPE,OUTPUT_FILE,ERR,ERROR,*999)
-                       ! ENDIF
+                      VFileName = OUTPUT_FILE(1:FileNameLength)
+                      Fields=>EQUATIONS_SET%REGION%FIELDS
+                      CALL WRITE_STRING(GENERAL_OUTPUT_TYPE,"  exporting nodes... ",ERR,ERROR,*999)
+                      CALL FIELD_IO_NODES_EXPORT(Fields,VFileName,METHOD,ERR,ERROR,*999)
+                      IF(CURRENT_LOOP_ITERATION==0) THEN
+                        CALL WRITE_STRING(GENERAL_OUTPUT_TYPE,"  Now export elements... ",ERR,ERROR,*999)
+                        CALL FIELD_IO_ELEMENTS_EXPORT(Fields,VFileName,METHOD,ERR,ERROR,*999)
                       ENDIF
+                      !IF(EXPORT_FIELD) THEN
+                        !IF(OUTPUT_ITERATION_NUMBER/=0.AND.MOD(CURRENT_LOOP_ITERATION,OUTPUT_ITERATION_NUMBER)==0)  THEN
+                      !    IF(SOLVER%OUTPUT_TYPE>=SOLVER_PROGRESS_OUTPUT) THEN
+                      !      CALL WRITE_STRING(GENERAL_OUTPUT_TYPE,"Quastatic Poisson exports fields ...",ERR,ERROR,*999)
+                      !      CALL WRITE_STRING(GENERAL_OUTPUT_TYPE,OUTPUT_FILE,ERR,ERROR,*999)
+                     !     ENDIF
+                     !     CALL FLUID_MECHANICS_IO_WRITE_CMGUI(EQUATIONS_SET%REGION,EQUATIONS_SET%GLOBAL_NUMBER,FILE, &
+                     !       & ERR,ERROR,*999)
+                     !     IF(SOLVER%OUTPUT_TYPE>=SOLVER_PROGRESS_OUTPUT) THEN
+                     !       CALL WRITE_STRING(GENERAL_OUTPUT_TYPE,"Quastatic Poisson all fields exported ...",ERR,ERROR,*999)
+                     !     ENDIF
+                     !     CALL WRITE_STRING(DIAGNOSTIC_OUTPUT_TYPE,OUTPUT_FILE,ERR,ERROR,*999)
+                       ! ENDIF
+                     ! ENDIF
                     ENDIF !stop_time
                   ENDDO !equations_set_id
                 ENDIF   !SOLVER MAPPING
