@@ -3261,9 +3261,11 @@ CONTAINS
     TYPE(FIELD_INTERPOLATED_POINT_TYPE), POINTER :: GEOMETRIC_INTERPOLATED_POINT,FIBRE_INTERPOLATED_POINT
     TYPE(FIELD_INTERPOLATED_POINT_METRICS_TYPE), POINTER :: GEOMETRIC_INTERP_POINT_METRICS
     TYPE(VARYING_STRING) :: LOCAL_ERROR
-    
+    TYPE(EQUATIONS_MATRIX_TYPE), POINTER :: STIFFNESS_MATRIX
+    REAL(DP), POINTER :: dependentParameters(:)
+!    TYPE(EQUATIONS_MATRICES_LINEAR_TYPE), POINTER :: LINEAR_MATRICES
     INTEGER(INTG) :: NUMBER_OF_DIMENSIONS,NUMBER_OF_XI,NUMBER_OF_ELEMENT_PARAMETERS,node_idx,dof_idx
-
+    LOGICAL :: UPDATE_STIFFNESS_MATRIX
     LOGICAL :: INSIDE,BETWEEN
     REAL(DP), POINTER :: INPUT_LABEL(:)
     REAL(DP) :: DIFF_COEFF1,DIFF_COEFF2
@@ -3275,16 +3277,14 @@ CONTAINS
 #endif    
 
     NULLIFY(SOURCE_FIELD_VARIABLE)
-    
+    NULLIFY(dependentParameters)
     CALL ENTERS("POISSON_EQUATION_FINITE_ELEMENT_CALCULATE",ERR,ERROR,*999)
 
     IF(ASSOCIATED(EQUATIONS_SET)) THEN
       EQUATIONS=>EQUATIONS_SET%EQUATIONS
       IF(ASSOCIATED(EQUATIONS)) THEN
         SELECT CASE(EQUATIONS_SET%SUBTYPE)
-        CASE(EQUATIONS_SET_CONSTANT_SOURCE_POISSON_SUBTYPE)        
-        !CASE(EQUATIONS_SET_CONSTANT_SOURCE_POISSON_SUBTYPE, &
-        !     & EQUATIONS_SET_TRANSIENT_SOURCE_POISSON_SUBTYPE)   
+        CASE(EQUATIONS_SET_CONSTANT_SOURCE_POISSON_SUBTYPE)    
           !Store all these in equations matrices/somewhere else?????
           DEPENDENT_FIELD=>EQUATIONS%INTERPOLATION%DEPENDENT_FIELD
           GEOMETRIC_FIELD=>EQUATIONS%INTERPOLATION%GEOMETRIC_FIELD
@@ -3295,8 +3295,9 @@ CONTAINS
           LINEAR_MATRICES=>EQUATIONS_MATRICES%LINEAR_MATRICES
           EQUATIONS_MATRIX=>LINEAR_MATRICES%MATRICES(1)%PTR
           RHS_VECTOR=>EQUATIONS_MATRICES%RHS_VECTOR
+          RHS_VECTOR%UPDATE_VECTOR= .TRUE.
           SOURCE_VECTOR=>EQUATIONS_MATRICES%SOURCE_VECTOR
-          SOURCE_VECTOR%UPDATE_VECTOR=.TRUE.
+          !SOURCE_VECTOR%UPDATE_VECTOR=.TRUE.
           
           EQUATIONS_MAPPING=>EQUATIONS%EQUATIONS_MAPPING
           LINEAR_MAPPING=>EQUATIONS_MAPPING%LINEAR_MAPPING
@@ -3327,6 +3328,7 @@ CONTAINS
             FIBRE_INTERPOLATED_POINT=>EQUATIONS%INTERPOLATION%FIBRE_INTERP_POINT(FIELD_U_VARIABLE_TYPE)%PTR
           ENDIF
           GEOMETRIC_INTERP_POINT_METRICS=>EQUATIONS%INTERPOLATION%GEOMETRIC_INTERP_POINT_METRICS(FIELD_U_VARIABLE_TYPE)%PTR
+
 
           !Loop over gauss points
           DO ng=1,QUADRATURE_SCHEME%NUMBER_OF_GAUSS
@@ -3367,29 +3369,32 @@ CONTAINS
                 & DNUDXI,DXIDNU,ERR,ERROR,*999)
               CALL MATRIX_PRODUCT(DNUDXI,CONDUCTIVITY_MATERIAL,CONDUCTIVITY_TEMP,ERR,ERROR,*999)
               CALL MATRIX_PRODUCT(CONDUCTIVITY_TEMP,DXIDNU,CONDUCTIVITY,ERR,ERROR,*999)
-           ELSE
-             CONDUCTIVITY=CONDUCTIVITY_MATERIAL
-           ENDIF
+            ELSE
+              CONDUCTIVITY=CONDUCTIVITY_MATERIAL
+            ENDIF
 
             !Loop over field components
             mhs=0          
             DO mh=1,FIELD_VARIABLE%NUMBER_OF_COMPONENTS
-              !Loop over element rows
+               !Loop over element rows
               DO ms=1,DEPENDENT_BASIS%NUMBER_OF_ELEMENT_PARAMETERS
                 mhs=mhs+1
-                !Loop over field components
+                 !Loop over field components
                 nhs=0
+              !  IF (EQUATIONS_MATRIX%FIRST_ASSEMBLY) THEN
+               !!   EQUATIONS_MATRIX%UPDATE_MATRIX= .TRUE.
+               ! ELSE 
+                !  EQUATIONS_MATRIX%UPDATE_MATRIX= .FALSE.
+                !ENDIF
                 IF(EQUATIONS_MATRIX%UPDATE_MATRIX) THEN
                   DO nh=1,FIELD_VARIABLE%NUMBER_OF_COMPONENTS
                     !Loop over element columns
                     DO ns=1,DEPENDENT_BASIS%NUMBER_OF_ELEMENT_PARAMETERS
                       nhs=nhs+1
-                      
                       DO ni=1,DEPENDENT_BASIS%NUMBER_OF_XI
                         PGMSI(ni)=QUADRATURE_SCHEME%GAUSS_BASIS_FNS(ms,PARTIAL_DERIVATIVE_FIRST_DERIVATIVE_MAP(ni),ng)
                         PGNSI(ni)=QUADRATURE_SCHEME%GAUSS_BASIS_FNS(ns,PARTIAL_DERIVATIVE_FIRST_DERIVATIVE_MAP(ni),ng)
                       ENDDO !ni
-                      
                       SUM=0.0_DP
                       DO i=1,DEPENDENT_BASIS%NUMBER_OF_XI
                         DO k=1,DEPENDENT_BASIS%NUMBER_OF_XI
@@ -3398,27 +3403,34 @@ CONTAINS
                           ENDDO !h
                         ENDDO !k
                       ENDDO !i
-                        
                       EQUATIONS_MATRIX%ELEMENT_MATRIX%MATRIX(mhs,nhs)=EQUATIONS_MATRIX%ELEMENT_MATRIX%MATRIX(mhs,nhs)+SUM*RWG
-    
                     ENDDO !ns
                   ENDDO !nh
                 ENDIF
+                !IF (SOURCE_VECTOR%FIRST_ASSEMBLY) THEN
+                !  SOURCE_VECTOR%UPDATE_VECTOR=.TRUE.
+                !ELSE
+                !  SOURCE_VECTOR%UPDATE_VECTOR=.FALSE.               
+               ! ENDIF
                 IF(SOURCE_VECTOR%UPDATE_VECTOR) THEN
                   IF (NUMBER_OF_DIMENSIONS==2) THEN
-                  !Use materials field value
-                  SUM=EQUATIONS%INTERPOLATION%MATERIALS_INTERP_POINT(FIELD_U_VARIABLE_TYPE)%PTR%VALUES(4,NO_PART_DERIV)
-                  SOURCE_VECTOR%ELEMENT_VECTOR%VECTOR(mhs)=SOURCE_VECTOR%ELEMENT_VECTOR%VECTOR(mhs)+ & !This needs to changed to the source vector
-                     & SUM*QUADRATURE_SCHEME%GAUSS_BASIS_FNS(ms,NO_PART_DERIV,ng)*RWG
+                    !Use materials field value
+                    SUM=EQUATIONS%INTERPOLATION%MATERIALS_INTERP_POINT(FIELD_U_VARIABLE_TYPE)%PTR%VALUES(4,NO_PART_DERIV)
+                    SOURCE_VECTOR%ELEMENT_VECTOR%VECTOR(mhs)=SOURCE_VECTOR%ELEMENT_VECTOR%VECTOR(mhs)+ & !This needs to changed to the source vector
+                      & SUM*QUADRATURE_SCHEME%GAUSS_BASIS_FNS(ms,NO_PART_DERIV,ng)*RWG
                   ELSEIF (NUMBER_OF_DIMENSIONS==3) THEN
-                  SUM=EQUATIONS%INTERPOLATION%MATERIALS_INTERP_POINT(FIELD_U_VARIABLE_TYPE)%PTR%VALUES(7,NO_PART_DERIV)
-                  SOURCE_VECTOR%ELEMENT_VECTOR%VECTOR(mhs)=SOURCE_VECTOR%ELEMENT_VECTOR%VECTOR(mhs)+ & !This needs to changed to the source vector
-                     & SUM*QUADRATURE_SCHEME%GAUSS_BASIS_FNS(ms,NO_PART_DERIV,ng)*RWG
+                    SUM=EQUATIONS%INTERPOLATION%MATERIALS_INTERP_POINT(FIELD_U_VARIABLE_TYPE)%PTR%VALUES(7,NO_PART_DERIV)
+                    SOURCE_VECTOR%ELEMENT_VECTOR%VECTOR(mhs)=SOURCE_VECTOR%ELEMENT_VECTOR%VECTOR(mhs)+ & !This needs to changed to the source vector
+                      & SUM*QUADRATURE_SCHEME%GAUSS_BASIS_FNS(ms,NO_PART_DERIV,ng)*RWG
                   ENDIF
                 ENDIF                
               ENDDO !ms
             ENDDO !mh
           ENDDO !ng
+
+!! As we update the value of phi in each iteration we need to update them too
+          CALL FIELD_PARAMETER_SET_DATA_GET(DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE,FIELD_VALUES_SET_TYPE, &
+            & dependentParameters,err,error,*999)
         
         CASE(EQUATIONS_SET_EXTRACELLULAR_BIDOMAIN_POISSON_SUBTYPE)
           
@@ -5458,7 +5470,7 @@ CONTAINS
     TYPE(SOLVER_MAPPING_TYPE), POINTER :: SOLVER_MAPPING !<A pointer to the solver mapping
     TYPE(EQUATIONS_TYPE), POINTER :: EQUATIONS
     TYPE(EQUATIONS_SET_TYPE), POINTER :: EQUATIONS_SET !<A pointer to the equations set
-
+    LOGICAL ::  BOUNDARY_UPDATE
     CALL ENTERS("POISSON_PRE_SOLVE",ERR,ERROR,*999)
     NULLIFY(SOLVER2)
  
@@ -5467,8 +5479,8 @@ CONTAINS
         IF(ASSOCIATED(CONTROL_LOOP%PROBLEM)) THEN
           SELECT CASE(CONTROL_LOOP%PROBLEM%SUBTYPE)
             CASE(PROBLEM_QUASISTATIC_LINEAR_SOURCE_POISSON_SUBTYPE)
+              BOUNDARY_UPDATE= .TRUE.
               CALL POISSON_PRE_SOLVE_UPDATE_BC(CONTROL_LOOP,SOLVER,ERR,ERROR,*999)
-               !CALL POISSON_PRE_SOLVE_UPDATE_INPUT_DATA(CONTROL_LOOP,SOLVER,ERR,ERROR,*999)
             CASE(PROBLEM_EXTRACELLULAR_BIDOMAIN_POISSON_SUBTYPE)
 !               do nothing          
             CASE(PROBLEM_LINEAR_SOURCE_POISSON_SUBTYPE)
@@ -5883,9 +5895,6 @@ CONTAINS
                            & NUMBER_OF_COMPONENTS,ERR,ERROR,*999)
                           NULLIFY(BOUNDARY_VALUES)
                           NULLIFY(BOUNDARY_NODES)
-                          !CALL FLUID_MECHANICS_IO_READ_BOUNDARY_CONDITIONS_ITERATION(SOLVER_LINEAR_TYPE,BOUNDARY_VALUES, &
-                          !  & BOUNDARY_NODES,NUMBER_OF_COMPONENTS,BOUNDARY_CONDITION_FIXED,CONTROL_LOOP%TIME_LOOP%INPUT_NUMBER, &
-                          !  & CONTROL_LOOP%TIME_LOOP%ITERATION_NUMBER)
                           WRITE(INPUT_FILE,'("./input/BC/BC_VALUES_",I0,".dat")') ITERATION
                           OPEN(UNIT=1, FILE=INPUT_FILE,STATUS='unknown')
                           READ(1,*) NUM_BC_NODES
@@ -5905,16 +5914,9 @@ CONTAINS
                           CALL WRITE_STRING(GENERAL_OUTPUT_TYPE,"  the number of boundary values that needs to be updated is ", &
                             & ERR,ERROR,*999)
                           WRITE(*,*) SIZE(BOUNDARY_VALUES)
-                          DO node_idx=1,SIZE(BOUNDARY_NODES)
-                          CALL FIELD_COMPONENT_DOF_GET_USER_NODE(EQUATIONS_SET%DEPENDENT%DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &
-                            & 1,NO_GLOBAL_DERIV,BOUNDARY_NODES(node_idx), &
-                            & 1,local_ny,global_ny,ERR,ERROR,*999)
-                            CALL FIELD_PARAMETER_SET_UPDATE_LOCAL_DOF(EQUATIONS_SET%DEPENDENT%DEPENDENT_FIELD, &
-                              & FIELD_U_VARIABLE_TYPE,FIELD_VALUES_SET_TYPE,local_ny, &
-                              & BOUNDARY_VALUES(node_idx),ERR,ERROR,*999)
-                          !UPDATE THE VALUE OF PHI FOR  FIRST VERSION, FIRST DERIVATIVE, FIRST COMPONENT 
-                          !  CALL FIELD_PARAMETER_SET_UPDATE_NODE(DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &  
-                           !   & FIELD_VALUES_SET_TYPE,1,1,BOUNDARY_NODES(I),1,BOUNDARY_VALUES(I),ERR,ERROR,*999)
+                          DO node_idx=1,SIZE(BOUNDARY_NODES) 
+                            CALL FIELD_PARAMETER_SET_UPDATE_NODE(DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &  
+                              & FIELD_VALUES_SET_TYPE,1,1,BOUNDARY_NODES(node_idx),1,BOUNDARY_VALUES(node_idx),ERR,ERROR,*999)
                           ENDDO
                         ELSE
                           CALL FLAG_ERROR("Boundary condition variable is not associated.",ERR,ERROR,*999)
@@ -5992,6 +5994,7 @@ CONTAINS
 !               do nothing
             CASE(PROBLEM_QUASISTATIC_LINEAR_SOURCE_POISSON_SUBTYPE)
               CALL POISSON_POST_SOLVE_OUTPUT_DATA(CONTROL_LOOP,SOLVER,ERR,ERROR,*999)
+              !CALL POISSON_QUASISTATIC_LINEAR_SOURCE_CONTROL_LOOP_POST_LOOP(CONTROL_LOOP,ERR,ERROR,*999)
             CASE(PROBLEM_NONLINEAR_SOURCE_POISSON_SUBTYPE)
 !               do nothing
             CASE(PROBLEM_LINEAR_PRESSURE_POISSON_SUBTYPE,PROBLEM_NONLINEAR_PRESSURE_POISSON_SUBTYPE, &
@@ -6053,10 +6056,10 @@ CONTAINS
     LOGICAL :: EXPORT_FIELD,UPDATE_MATRIX
     TYPE(VARYING_STRING) :: METHOD!,FILE
     CHARACTER(20) :: FILE
-    CHARACTER(80086592) :: OUTPUT_FILE
+    CHARACTER(20) :: OUTPUT_FILE
     INTEGER(INTG) :: FileNameLength
     TYPE(VARYING_STRING) :: VFileName
-    TYPE(VARYING_STRING) :: FILENAME
+     TYPE(VARYING_STRING) ::FILE_NAME
     TYPE(FIELDS_TYPE), POINTER :: Fields  !<the field object for standard field IO
 
 
@@ -6143,32 +6146,18 @@ CONTAINS
                     OUTPUT_ITERATION_NUMBER=TIME_LOOP%TIME_LOOP%OUTPUT_NUMBER
                     !Write out fields at each timestep
                     IF(TIME_LOOP%TIME_LOOP%CURRENT_TIME<=TIME_LOOP%TIME_LOOP%STOP_TIME) THEN
-                      WRITE(OUTPUT_FILE,'("S_TIMESTP_",I4.4)') CURRENT_LOOP_ITERATION
-                      FILE=OUTPUT_FILE
+                      WRITE(OUTPUT_FILE,'("TIMESTP_",I4.4)') CURRENT_LOOP_ITERATION
+                      FILE_NAME=OUTPUT_FILE
                       METHOD="FORTRAN"
                       EXPORT_FIELD=.TRUE.
-                      VFileName = OUTPUT_FILE(1:FileNameLength)
+                      !VFileName = OUTPUT_FILE(1:FileNameLength)
                       Fields=>EQUATIONS_SET%REGION%FIELDS
                       CALL WRITE_STRING(GENERAL_OUTPUT_TYPE,"  exporting nodes... ",ERR,ERROR,*999)
-                      CALL FIELD_IO_NODES_EXPORT(Fields,VFileName,METHOD,ERR,ERROR,*999)
+                      CALL FIELD_IO_NODES_EXPORT(Fields,FILE_NAME,METHOD,ERR,ERROR,*999)
                       IF(CURRENT_LOOP_ITERATION==0) THEN
                         CALL WRITE_STRING(GENERAL_OUTPUT_TYPE,"  Now export elements... ",ERR,ERROR,*999)
-                        CALL FIELD_IO_ELEMENTS_EXPORT(Fields,VFileName,METHOD,ERR,ERROR,*999)
+                        CALL FIELD_IO_ELEMENTS_EXPORT(Fields,FILE_NAME,METHOD,ERR,ERROR,*999)
                       ENDIF
-                      !IF(EXPORT_FIELD) THEN
-                        !IF(OUTPUT_ITERATION_NUMBER/=0.AND.MOD(CURRENT_LOOP_ITERATION,OUTPUT_ITERATION_NUMBER)==0)  THEN
-                      !    IF(SOLVER%OUTPUT_TYPE>=SOLVER_PROGRESS_OUTPUT) THEN
-                      !      CALL WRITE_STRING(GENERAL_OUTPUT_TYPE,"Quastatic Poisson exports fields ...",ERR,ERROR,*999)
-                      !      CALL WRITE_STRING(GENERAL_OUTPUT_TYPE,OUTPUT_FILE,ERR,ERROR,*999)
-                     !     ENDIF
-                     !     CALL FLUID_MECHANICS_IO_WRITE_CMGUI(EQUATIONS_SET%REGION,EQUATIONS_SET%GLOBAL_NUMBER,FILE, &
-                     !       & ERR,ERROR,*999)
-                     !     IF(SOLVER%OUTPUT_TYPE>=SOLVER_PROGRESS_OUTPUT) THEN
-                     !       CALL WRITE_STRING(GENERAL_OUTPUT_TYPE,"Quastatic Poisson all fields exported ...",ERR,ERROR,*999)
-                     !     ENDIF
-                     !     CALL WRITE_STRING(DIAGNOSTIC_OUTPUT_TYPE,OUTPUT_FILE,ERR,ERROR,*999)
-                       ! ENDIF
-                     ! ENDIF
                     ENDIF !stop_time
                   ENDDO !equations_set_id
                 ENDIF   !SOLVER MAPPING
@@ -6241,4 +6230,7 @@ CONTAINS
   !================================================================================================================================
   !
 
+  !
+  !================================================================================================================================
+  !
 END MODULE POISSON_EQUATIONS_ROUTINES
