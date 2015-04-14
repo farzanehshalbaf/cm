@@ -3407,11 +3407,6 @@ CONTAINS
                     ENDDO !ns
                   ENDDO !nh
                 ENDIF
-                !IF (SOURCE_VECTOR%FIRST_ASSEMBLY) THEN
-                !  SOURCE_VECTOR%UPDATE_VECTOR=.TRUE.
-                !ELSE
-                !  SOURCE_VECTOR%UPDATE_VECTOR=.FALSE.               
-               ! ENDIF
                 IF(SOURCE_VECTOR%UPDATE_VECTOR) THEN
                   IF (NUMBER_OF_DIMENSIONS==2) THEN
                     !Use materials field value
@@ -3428,9 +3423,6 @@ CONTAINS
             ENDDO !mh
           ENDDO !ng
 
-!! As we update the value of phi in each iteration we need to update them too
-          CALL FIELD_PARAMETER_SET_DATA_GET(DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE,FIELD_VALUES_SET_TYPE, &
-            & dependentParameters,err,error,*999)
         
         CASE(EQUATIONS_SET_EXTRACELLULAR_BIDOMAIN_POISSON_SUBTYPE)
           
@@ -5915,8 +5907,12 @@ CONTAINS
                             & ERR,ERROR,*999)
                           WRITE(*,*) SIZE(BOUNDARY_VALUES)
                           DO node_idx=1,SIZE(BOUNDARY_NODES) 
-                            CALL FIELD_PARAMETER_SET_UPDATE_NODE(DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &  
-                              & FIELD_VALUES_SET_TYPE,1,1,BOUNDARY_NODES(node_idx),1,BOUNDARY_VALUES(node_idx),ERR,ERROR,*999)
+                          BOUNDARY_CONDITION_CHECK_VARIABLE=BOUNDARY_CONDITIONS_VARIABLE% &
+                            & CONDITION_TYPES(BOUNDARY_NODES(node_idx))         
+                            IF(BOUNDARY_CONDITION_CHECK_VARIABLE==BOUNDARY_CONDITION_FIXED) THEN
+                              CALL FIELD_PARAMETER_SET_UPDATE_NODE(DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &  
+                                & FIELD_VALUES_SET_TYPE,1,1,BOUNDARY_NODES(node_idx),1,BOUNDARY_VALUES(node_idx),ERR,ERROR,*999)
+                            ENDIF
                           ENDDO
                         ELSE
                           CALL FLAG_ERROR("Boundary condition variable is not associated.",ERR,ERROR,*999)
