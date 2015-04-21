@@ -81,6 +81,7 @@ MODULE BIODOMAIN_EQUATION_ROUTINES
   !Interfaces
 
   PUBLIC BIODOMAIN_CONTROL_LOOP_POST_LOOP
+  PUBLIC BIODOMAIN_CONTROL_LOOP_PRE_LOOP
   
   PUBLIC BIODOMAIN_EQUATION_EQUATIONS_SET_SETUP
 
@@ -97,6 +98,151 @@ MODULE BIODOMAIN_EQUATION_ROUTINES
   PUBLIC BIODOMAIN_EQUATION_PROBLEM_SUBTYPE_SET
   
 CONTAINS
+  !
+  !================================================================================================================================
+  !
+
+  !>Runs before each control loop iteration
+  SUBROUTINE BIODOMAIN_CONTROL_LOOP_PRE_LOOP(CONTROL_LOOP,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(CONTROL_LOOP_TYPE), POINTER :: CONTROL_LOOP !<A pointer to the control loop.
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    INTEGER(INTG) :: equations_set_idx
+    TYPE(CONTROL_LOOP_TIME_TYPE), POINTER :: TIME_LOOP,TIME_LOOP_PARENT
+    TYPE(CONTROL_LOOP_TYPE), POINTER :: PARENT_LOOP
+    TYPE(EQUATIONS_SET_TYPE), POINTER :: EQUATIONS_SET
+    TYPE(FIELD_TYPE), POINTER :: DEPENDENT_FIELD
+    TYPE(PROBLEM_TYPE), POINTER :: PROBLEM
+    TYPE(REGION_TYPE), POINTER :: DEPENDENT_REGION   
+    TYPE(SOLVER_TYPE), POINTER :: SOLVER
+    TYPE(SOLVER_EQUATIONS_TYPE), POINTER :: SOLVER_EQUATIONS
+    TYPE(SOLVER_MAPPING_TYPE), POINTER :: SOLVER_MAPPING
+    TYPE(SOLVERS_TYPE), POINTER :: SOLVERS
+    TYPE(VARYING_STRING) :: FILENAME,LOCAL_ERROR,METHOD
+    TYPE(EQUATIONS_TYPE), POINTER :: EQUATIONS
+    TYPE(EQUATIONS_MAPPING_DYNAMIC_TYPE), POINTER :: DYNAMIC_MAPPING
+    TYPE(EQUATIONS_MATRICES_TYPE), POINTER :: EQUATIONS_MATRICES
+    TYPE(EQUATIONS_MATRICES_DYNAMIC_TYPE), POINTER :: DYNAMIC_MATRICES
+    TYPE(EQUATIONS_MATRICES_RHS_TYPE), POINTER :: RHS_VECTOR
+    TYPE(EQUATIONS_MATRICES_SOURCE_TYPE), POINTER :: SOURCE_VECTOR
+    TYPE(EQUATIONS_MATRIX_TYPE), POINTER :: DAMPING_MATRIX,STIFFNESS_MATRIX
+    TYPE(FIELD_TYPE), POINTER :: INDEPENDENT_FIELD
+    TYPE(FIELD_VARIABLE_TYPE), POINTER :: FIELD_VARIABLE
+    INTEGER(INTG) :: OUTPUT_ITERATION_NUMBER,CURRENT_LOOP_ITERATION,ITERATION
+    INTEGER(INTG) :: NUMBER_OF_COMPONENTS,NUM_Ve_NODES,node_idx,I
+    REAL(DP) :: CURRENT_TIME,TIME_INCREMENT
+    REAL(DP), POINTER :: EXTRACELLULAR_VALUES(:)
+    INTEGER(INTG), POINTER :: EXTRACELLULAR_NODES(:)
+    CHARACTER(34) :: INPUT_FILE
+
+
+
+
+    CALL ENTERS("BIODOMAIN_CONTROL_LOOP_PRE_LOOP",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(CONTROL_LOOP)) THEN
+      CALL CONTROL_LOOP_CURRENT_TIMES_GET(CONTROL_LOOP,CURRENT_TIME,TIME_INCREMENT,ERR,ERROR,*999)
+      CALL WRITE_STRING(GENERAL_OUTPUT_TYPE,"  the current iteration number is ",ERR,ERROR,*999)
+      WRITE (*,*) CONTROL_LOOP%TIME_LOOP%ITERATION_NUMBER
+      ITERATION=CONTROL_LOOP%TIME_LOOP%ITERATION_NUMBER
+      IF(ASSOCIATED(SOLVER)) THEN
+        IF(ASSOCIATED(CONTROL_LOOP%PROBLEM)) THEN
+          SELECT CASE(CONTROL_LOOP%PROBLEM%SUBTYPE)
+          CASE (PROBLEM_MONODOMAIN_QUASI_STRANG_SPLIT_SUBTYPE)
+            SOLVER_EQUATIONS=>SOLVER%SOLVER_EQUATIONS
+            IF(ASSOCIATED(SOLVER_EQUATIONS)) THEN
+              SOLVER_MAPPING=>SOLVER_EQUATIONS%SOLVER_MAPPING
+              EQUATIONS=>SOLVER_MAPPING%EQUATIONS_SET_TO_SOLVER_MAP(2)%EQUATIONS
+              IF(ASSOCIATED(EQUATIONS)) THEN
+                EQUATIONS_MATRICES=>EQUATIONS%EQUATIONS_MATRICES
+                DYNAMIC_MATRICES=>EQUATIONS_MATRICES%DYNAMIC_MATRICES
+                STIFFNESS_MATRIX=>DYNAMIC_MATRICES%MATRICES(1)%PTR
+                DAMPING_MATRIX=>DYNAMIC_MATRICES%MATRICES(2)%PTR
+                SOURCE_VECTOR=>EQUATIONS_MATRICES%SOURCE_VECTOR
+                RHS_VECTOR=>EQUATIONS_MATRICES%RHS_VECTOR
+                EQUATIONS_SET=>EQUATIONS%EQUATIONS_SET
+                IF(ASSOCIATED(EQUATIONS_SET)) THEN
+                  IF(ITERATION > 0) THEN 
+                    STIFFNESS_MATRIX%UPDATE_MATRIX= .FALSE.
+                    DAMPING_MATRIX%UPDATE_MATRIX= .FALSE.
+                    SOURCE_VECTOR%UPDATE_VECTOR= .TRUE.
+                    RHS_VECTOR%UPDATE_VECTOR= .FALSE.
+                  ENDIF
+                 INDEPENDENT_FIELD=>EQUATIONS_SET%INDEPENDENT%INDEPENDENT_FIELD
+                 IF(ASSOCIATED(INDEPENDENT_FIELD)) THEN
+                   NULLIFY(FIELD_VARIABLE)
+                   CALL FIELD_VARIABLE_GET(INDEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE,FIELD_VARIABLE,ERR,ERROR,*999)
+                   IF(ASSOCIATED(FIELD_VARIABLE)) THEN
+                     CALL FIELD_NUMBER_OF_COMPONENTS_GET(EQUATIONS_SET%INDEPENDENT%INDEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &
+                       & NUMBER_OF_COMPONENTS,ERR,ERROR,*999)
+                     NULLIFY(EXTRACELLULAR_VALUES)
+                     NULLIFY(EXTRACELLULAR_NODES)
+                     WRITE(INPUT_FILE,'("./input/Ve/Ve_VALUES_",I0,".dat")') ITERATION
+                     OPEN(UNIT=1, FILE=INPUT_FILE,STATUS='unknown')
+                     READ(1,*) NUM_Ve_NODES
+                     ALLOCATE(EXTRACELLULAR_NODES(NUM_Ve_NODES))
+                     ALLOCATE(EXTRACELLULAR_VALUES(NUM_Ve_NODES))
+                     CALL WRITE_STRING(GENERAL_OUTPUT_TYPE,"  reading the extracellular values from file... ",ERR,ERROR,*999)
+                     DO I=1,NUM_Ve_NODES
+                     READ(1,*) EXTRACELLULAR_NODES(I)
+                     ENDDO
+                     DO I=1,NUM_Ve_NODES
+                     READ(1,*) EXTRACELLULAR_VALUES(I)
+                     ENDDO
+                     CALL WRITE_STRING(GENERAL_OUTPUT_TYPE,"  reading filed is finished. ",ERR,ERROR,*999)
+                     EXTRACELLULAR_VALUES=EXTRACELLULAR_VALUES
+                     EXTRACELLULAR_NODES=EXTRACELLULAR_NODES
+                     CLOSE(1)
+                     CALL WRITE_STRING(GENERAL_OUTPUT_TYPE,"  the number of VE values that needs to be updated is ", &
+                       & ERR,ERROR,*999)
+                     WRITE(*,*) SIZE(EXTRACELLULAR_VALUES)
+                     DO node_idx=1,SIZE(EXTRACELLULAR_NODES) 
+                       CALL FIELD_PARAMETER_SET_UPDATE_NODE(INDEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &  
+                         & FIELD_VALUES_SET_TYPE,1,1,EXTRACELLULAR_NODES(node_idx),1,EXTRACELLULAR_VALUES(node_idx),ERR,ERROR,*999)       
+                     ENDDO
+                   ELSE
+                     CALL FLAG_ERROR("InDependent field variable is not associated.",ERR,ERROR,*999)
+                   ENDIF
+                 ELSE 
+                   CALL FLAG_ERROR("Equations set INdependent variable is not associated.",ERR,ERROR,*999)
+                 ENDIF
+                ELSE
+                  CALL FLAG_ERROR("Equations set is not associated.",ERR,ERROR,*999)
+                ENDIF
+              ENDIF
+            ELSE
+              CALL FLAG_ERROR("Solver equations are not associated.",ERR,ERROR,*999)
+            END IF
+          CALL FIELD_PARAMETER_SET_UPDATE_START(EQUATIONS_SET%DEPENDENT%DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, & 
+            & FIELD_VALUES_SET_TYPE,ERR,ERROR,*999)
+          CALL FIELD_PARAMETER_SET_UPDATE_FINISH(EQUATIONS_SET%DEPENDENT%DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, & 
+            & FIELD_VALUES_SET_TYPE,ERR,ERROR,*999)
+          CASE DEFAULT
+            LOCAL_ERROR="Problem subtype "//TRIM(NUMBER_TO_VSTRING(CONTROL_LOOP%PROBLEM%SUBTYPE,"*",ERR,ERROR))// &
+              & " is not valid for an bidomain equation of a bioelectric problem class."
+            CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+          END SELECT
+        ELSE
+          CALL FLAG_ERROR("Problem is not associated.",ERR,ERROR,*999)
+        ENDIF
+      ELSE
+        CALL FLAG_ERROR("Solver is not associated.",ERR,ERROR,*999)
+      ENDIF
+    ELSE
+      CALL FLAG_ERROR("Control loop is not associated.",ERR,ERROR,*999)
+    ENDIF
+
+    CALL EXITS("BIODOMAIN_CONTROL_LOOP_PRE_LOOP")
+    RETURN
+999 CALL ERRORS("BIODOMAIN_CONTROL_LOOP_PRE_LOOP",ERR,ERROR)
+    CALL EXITS("BIODOMAIN_CONTROL_LOOP_PRE_LOOP")
+    RETURN 1
+
+    
+  END SUBROUTINE BIODOMAIN_CONTROL_LOOP_PRE_LOOP
 
   !
   !================================================================================================================================
@@ -276,6 +422,11 @@ CONTAINS
         SELECT CASE(EQUATIONS_SET_SETUP%ACTION_TYPE)
         CASE(EQUATIONS_SET_SETUP_START_ACTION)
           SELECT CASE(EQUATIONS_SET%TYPE)
+
+          !-----------------------------------------------------------------
+          ! M o n o D o m a i n   Dependent f i e l d 
+          !-----------------------------------------------------------------
+
           CASE(EQUATIONS_SET_MONODOMAIN_EQUATION_TYPE)
             IF(EQUATIONS_SET%DEPENDENT%DEPENDENT_FIELD_AUTO_CREATED) THEN
               !Create the auto created dependent field
@@ -415,6 +566,9 @@ CONTAINS
                 CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
               END SELECT
             ENDIF
+          !-----------------------------------------------------------------
+          ! Bi-D o m a i n dependent  f i e l d 
+          !-----------------------------------------------------------------
           CASE(EQUATIONS_SET_BIDOMAIN_EQUATION_TYPE)
             SELECT CASE(EQUATIONS_SET%SUBTYPE)
             CASE(EQUATIONS_SET_FIRST_BIDOMAIN_SUBTYPE)
@@ -628,12 +782,97 @@ CONTAINS
           CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
         END SELECT
 
+
       CASE(EQUATIONS_SET_SETUP_INDEPENDENT_TYPE)
         SELECT CASE(EQUATIONS_SET_SETUP%ACTION_TYPE)
         CASE(EQUATIONS_SET_SETUP_START_ACTION)
           SELECT CASE(EQUATIONS_SET%TYPE)
+
+          !-----------------------------------------------------------------
+          ! M o n o D o m a i n  independent  f i e l d 
+          !-----------------------------------------------------------------
           CASE(EQUATIONS_SET_MONODOMAIN_EQUATION_TYPE)
             SELECT CASE(EQUATIONS_SET%SUBTYPE)
+            CASE(EQUATIONS_SET_QUASI_MONODOMAIN_SUBTYPE)
+              IF(EQUATIONS_SET%INDEPENDENT%INDEPENDENT_FIELD_AUTO_CREATED) THEN
+                CALL FIELD_CREATE_START(EQUATIONS_SET_SETUP%FIELD_USER_NUMBER,EQUATIONS_SET%REGION,EQUATIONS_SET%INDEPENDENT% &
+                  & INDEPENDENT_FIELD,ERR,ERROR,*999)
+                CALL FIELD_LABEL_SET(EQUATIONS_SET%INDEPENDENT%INDEPENDENT_FIELD,"Extracellular_potential",ERR,ERROR,*999)
+                CALL FIELD_TYPE_SET_AND_LOCK(EQUATIONS_SET%INDEPENDENT%INDEPENDENT_FIELD,FIELD_GENERAL_TYPE,ERR,ERROR,*999)
+                CALL FIELD_DEPENDENT_TYPE_SET_AND_LOCK(EQUATIONS_SET%INDEPENDENT%INDEPENDENT_FIELD,FIELD_INDEPENDENT_TYPE, &
+                  & ERR,ERROR,*999)
+                CALL FIELD_MESH_DECOMPOSITION_GET(EQUATIONS_SET%GEOMETRY%GEOMETRIC_FIELD,GEOMETRIC_DECOMPOSITION,ERR,ERROR,*999)
+                CALL FIELD_MESH_DECOMPOSITION_SET_AND_LOCK(EQUATIONS_SET%INDEPENDENT%INDEPENDENT_FIELD,GEOMETRIC_DECOMPOSITION, &
+                  & ERR,ERROR,*999)
+                CALL FIELD_GEOMETRIC_FIELD_SET_AND_LOCK(EQUATIONS_SET%INDEPENDENT%INDEPENDENT_FIELD,EQUATIONS_SET%GEOMETRY% &
+                  & GEOMETRIC_FIELD,ERR,ERROR,*999)
+                CALL FIELD_NUMBER_OF_VARIABLES_SET_AND_LOCK(EQUATIONS_SET%INDEPENDENT%INDEPENDENT_FIELD,1,ERR,ERROR,*999)
+                CALL FIELD_VARIABLE_TYPES_SET_AND_LOCK(EQUATIONS_SET%INDEPENDENT%INDEPENDENT_FIELD,[FIELD_U_VARIABLE_TYPE &
+                  & ],ERR,ERROR,*999)
+                CALL FIELD_DIMENSION_SET_AND_LOCK(EQUATIONS_SET%INDEPENDENT%INDEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &
+                    & FIELD_SCALAR_DIMENSION_TYPE,ERR,ERROR,*999)
+                CALL FIELD_DATA_TYPE_SET_AND_LOCK(EQUATIONS_SET%INDEPENDENT%INDEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &
+                  & FIELD_DP_TYPE,ERR,ERROR,*999)
+                CALL FIELD_NUMBER_OF_COMPONENTS_SET_AND_LOCK(EQUATIONS_SET%INDEPENDENT%INDEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &
+                    & 1,ERR,ERROR,*999)
+                !Default to the geometric interpolation setup
+                CALL FIELD_COMPONENT_MESH_COMPONENT_GET(EQUATIONS_SET%GEOMETRY%GEOMETRIC_FIELD,FIELD_U_VARIABLE_TYPE,1, &
+                  & GEOMETRIC_MESH_COMPONENT,ERR,ERROR,*999)
+                CALL FIELD_COMPONENT_MESH_COMPONENT_SET(EQUATIONS_SET%INDEPENDENT%INDEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE,1, &
+                  & GEOMETRIC_MESH_COMPONENT,ERR,ERROR,*999)
+                SELECT CASE(EQUATIONS_SET%SOLUTION_METHOD)
+                CASE(EQUATIONS_SET_FEM_SOLUTION_METHOD)
+                  CALL FIELD_COMPONENT_INTERPOLATION_SET_AND_LOCK(EQUATIONS_SET%INDEPENDENT%INDEPENDENT_FIELD, &
+                    & FIELD_U_VARIABLE_TYPE,1,FIELD_NODE_BASED_INTERPOLATION,ERR,ERROR,*999)
+                !Default the scaling to the geometric field scaling
+                  CALL FIELD_SCALING_TYPE_GET(EQUATIONS_SET%GEOMETRY%GEOMETRIC_FIELD,GEOMETRIC_SCALING_TYPE,ERR,ERROR,*999)
+                  CALL FIELD_SCALING_TYPE_SET(EQUATIONS_SET%INDEPENDENT%INDEPENDENT_FIELD,GEOMETRIC_SCALING_TYPE,ERR,ERROR,*999)
+                CASE(EQUATIONS_SET_BEM_SOLUTION_METHOD)
+                  CALL FLAG_ERROR("Not implemented.",ERR,ERROR,*999)
+                CASE(EQUATIONS_SET_FD_SOLUTION_METHOD)
+                  CALL FLAG_ERROR("Not implemented.",ERR,ERROR,*999)
+                CASE(EQUATIONS_SET_FV_SOLUTION_METHOD)
+                  CALL FLAG_ERROR("Not implemented.",ERR,ERROR,*999)
+                CASE(EQUATIONS_SET_GFEM_SOLUTION_METHOD)
+                  CALL FLAG_ERROR("Not implemented.",ERR,ERROR,*999)
+                CASE(EQUATIONS_SET_GFV_SOLUTION_METHOD)
+                  CALL FLAG_ERROR("Not implemented.",ERR,ERROR,*999)
+                CASE DEFAULT
+                  LOCAL_ERROR="The solution method of "//TRIM(NUMBER_TO_VSTRING(EQUATIONS_SET%SOLUTION_METHOD,"*",ERR,ERROR))// &
+                    & " is invalid."
+                  CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+                END SELECT
+              ELSE
+                !Check the user specified field
+                CALL FIELD_TYPE_CHECK(EQUATIONS_SET_SETUP%FIELD,FIELD_GENERAL_TYPE,ERR,ERROR,*999)
+                CALL FIELD_DEPENDENT_TYPE_CHECK(EQUATIONS_SET_SETUP%FIELD,FIELD_INDEPENDENT_TYPE,ERR,ERROR,*999)
+                CALL FIELD_NUMBER_OF_VARIABLES_CHECK(EQUATIONS_SET_SETUP%FIELD,1,ERR,ERROR,*999)
+                CALL FIELD_VARIABLE_TYPES_CHECK(EQUATIONS_SET_SETUP%FIELD,[FIELD_U_VARIABLE_TYPE],ERR,ERROR,*999)
+                CALL FIELD_DIMENSION_CHECK(EQUATIONS_SET_SETUP%FIELD,FIELD_U_VARIABLE_TYPE,FIELD_SCALAR_DIMENSION_TYPE, &
+                  & ERR,ERROR,*999)
+                CALL FIELD_DATA_TYPE_CHECK(EQUATIONS_SET_SETUP%FIELD,FIELD_U_VARIABLE_TYPE,FIELD_DP_TYPE,ERR,ERROR,*999)
+                CALL FIELD_NUMBER_OF_COMPONENTS_CHECK(EQUATIONS_SET_SETUP%FIELD,FIELD_U_VARIABLE_TYPE,1,ERR,ERROR,*999)
+                SELECT CASE(EQUATIONS_SET%SOLUTION_METHOD)
+                CASE(EQUATIONS_SET_FEM_SOLUTION_METHOD)
+                  CALL FIELD_COMPONENT_INTERPOLATION_CHECK(EQUATIONS_SET_SETUP%FIELD,FIELD_U_VARIABLE_TYPE,1, &
+                    & FIELD_NODE_BASED_INTERPOLATION,ERR,ERROR,*999)
+                CASE(EQUATIONS_SET_BEM_SOLUTION_METHOD)
+                  CALL FLAG_ERROR("Not implemented.",ERR,ERROR,*999)
+                CASE(EQUATIONS_SET_FD_SOLUTION_METHOD)
+                  CALL FLAG_ERROR("Not implemented.",ERR,ERROR,*999)
+                CASE(EQUATIONS_SET_FV_SOLUTION_METHOD)
+                  CALL FLAG_ERROR("Not implemented.",ERR,ERROR,*999)
+                CASE(EQUATIONS_SET_GFEM_SOLUTION_METHOD)
+                  CALL FLAG_ERROR("Not implemented.",ERR,ERROR,*999)
+                CASE(EQUATIONS_SET_GFV_SOLUTION_METHOD)
+                  CALL FLAG_ERROR("Not implemented.",ERR,ERROR,*999)
+                CASE DEFAULT
+                  LOCAL_ERROR="The solution method of "//TRIM(NUMBER_TO_VSTRING(EQUATIONS_SET%SOLUTION_METHOD,"*",ERR,ERROR))// &
+                    & " is invalid."
+                  CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+                END SELECT
+              ENDIF
+
             CASE(EQUATIONS_SET_1D3D_MONODOMAIN_ELASTICITY_SUBTYPE,EQUATIONS_SET_MONODOMAIN_ELASTICITY_W_TITIN_SUBTYPE)
               IF(EQUATIONS_SET%INDEPENDENT%INDEPENDENT_FIELD_AUTO_CREATED) THEN
                 !Create the auto created independent field
@@ -854,6 +1093,10 @@ CONTAINS
           CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
         END SELECT
 
+          !-----------------------------------------------------------------
+          ! M a t e r i a l s   f i e l d 
+          !-----------------------------------------------------------------
+
       CASE(EQUATIONS_SET_SETUP_MATERIALS_TYPE)
         SELECT CASE(EQUATIONS_SET_SETUP%ACTION_TYPE)
         CASE(EQUATIONS_SET_SETUP_START_ACTION)
@@ -883,9 +1126,15 @@ CONTAINS
                 CALL FIELD_NUMBER_OF_COMPONENTS_GET(EQUATIONS_SET%GEOMETRY%GEOMETRIC_FIELD,FIELD_U_VARIABLE_TYPE, &
                   & NUMBER_OF_DIMENSIONS,ERR,ERROR,*999)
                 IF(EQUATIONS_SET%TYPE==EQUATIONS_SET_MONODOMAIN_EQUATION_TYPE) THEN
+                  IF (EQUATIONS_SET%SUBTYPE==EQUATIONS_SET_QUASI_MONODOMAIN_SUBTYPE) THEN
+                  !Monodomain. Materials field components are 3 plus one for each dimension i.e., Am,Cm,gr and \sigma
+                    NUMBER_OF_MATERIALS_COMPONENTS=NUMBER_OF_DIMENSIONS+3
+                    DIMENSION_MULTIPLIER=1
+                  ELSE
                   !Monodomain. Materials field components are 2 plus one for each dimension i.e., Am, Cm and \sigma
-                  NUMBER_OF_MATERIALS_COMPONENTS=NUMBER_OF_DIMENSIONS+2
-                  DIMENSION_MULTIPLIER=1
+                    NUMBER_OF_MATERIALS_COMPONENTS=NUMBER_OF_DIMENSIONS+2
+                    DIMENSION_MULTIPLIER=1
+                  ENDIF 
                 ELSE
                   !Bidomain. Materials field components are 2 plus two for each dimension i.e., Am, C, \sigma_i and \sigma_e
                   NUMBER_OF_MATERIALS_COMPONENTS=2*NUMBER_OF_DIMENSIONS+2
@@ -918,6 +1167,14 @@ CONTAINS
                       & 2+component_idx+(dimension_idx-1)*NUMBER_OF_DIMENSIONS,FIELD_CONSTANT_INTERPOLATION,ERR,ERROR,*999)
                   ENDDO !dimension_idx
                 ENDDO !component_idx
+                IF (EQUATIONS_SET%SUBTYPE==EQUATIONS_SET_QUASI_MONODOMAIN_SUBTYPE) THEN
+                  CALL FIELD_COMPONENT_MESH_COMPONENT_SET(EQUATIONS_MATERIALS%MATERIALS_FIELD,FIELD_U_VARIABLE_TYPE, &
+                    & NUMBER_OF_DIMENSIONS+1,GEOMETRIC_COMPONENT_NUMBER,ERR,ERROR,*999)
+                  CALL FIELD_COMPONENT_INTERPOLATION_SET(EQUATIONS_MATERIALS%MATERIALS_FIELD,FIELD_U_VARIABLE_TYPE, &
+                    & NUMBER_OF_DIMENSIONS+1,FIELD_CONSTANT_INTERPOLATION,ERR,ERROR,*999)
+                  CALL FIELD_COMPONENT_LABEL_SET(EQUATIONS_MATERIALS%MATERIALS_FIELD,FIELD_U_VARIABLE_TYPE, & 
+                    & NUMBER_OF_DIMENSIONS+1,"gr",ERR,ERROR,*999)
+                ENDIF
                 !Default the field scaling to that of the geometric field
                 CALL FIELD_SCALING_TYPE_GET(EQUATIONS_SET%GEOMETRY%GEOMETRIC_FIELD,GEOMETRIC_SCALING_TYPE,ERR,ERROR,*999)
                 CALL FIELD_SCALING_TYPE_SET(EQUATIONS_MATERIALS%MATERIALS_FIELD,GEOMETRIC_SCALING_TYPE,ERR,ERROR,*999)
@@ -934,9 +1191,15 @@ CONTAINS
                   & NUMBER_OF_DIMENSIONS,ERR,ERROR,*999)
                 SELECT CASE(EQUATIONS_SET%TYPE)
                 CASE(EQUATIONS_SET_MONODOMAIN_EQUATION_TYPE,EQUATIONS_SET_MONODOMAIN_STRANG_SPLITTING_EQUATION_TYPE)
-                  !Monodomain. Materials field components are 2 plus one for each dimension i.e., Am, Cm and \sigma
-                  CALL FIELD_NUMBER_OF_COMPONENTS_CHECK(EQUATIONS_SET_SETUP%FIELD,FIELD_U_VARIABLE_TYPE,NUMBER_OF_DIMENSIONS+2, &
-                    & ERR,ERROR,*999)
+                  IF (EQUATIONS_SET%SUBTYPE==EQUATIONS_SET_QUASI_MONODOMAIN_SUBTYPE) THEN 
+                   !Monodomain. Materials field components are 2 plus one for each dimension i.e., Am, Cm,gr and \sigma
+                    CALL FIELD_NUMBER_OF_COMPONENTS_CHECK(EQUATIONS_SET_SETUP%FIELD,FIELD_U_VARIABLE_TYPE,NUMBER_OF_DIMENSIONS+3, &
+                      & ERR,ERROR,*999)
+                  ELSE
+                   !Monodomain. Materials field components are 2 plus one for each dimension i.e., Am, Cm and \sigma
+                    CALL FIELD_NUMBER_OF_COMPONENTS_CHECK(EQUATIONS_SET_SETUP%FIELD,FIELD_U_VARIABLE_TYPE,NUMBER_OF_DIMENSIONS+2, &
+                      & ERR,ERROR,*999)
+                  ENDIF
                 CASE(EQUATIONS_SET_BIDOMAIN_EQUATION_TYPE)
                   !Bidomain. Materials field components are 2 plus two for each dimension i.e., Am, C, \sigma_i and \sigma_e
                   CALL FIELD_NUMBER_OF_COMPONENTS_CHECK(EQUATIONS_SET_SETUP%FIELD,FIELD_U_VARIABLE_TYPE,2*NUMBER_OF_DIMENSIONS+2, &
@@ -963,9 +1226,15 @@ CONTAINS
               CALL FIELD_NUMBER_OF_COMPONENTS_GET(EQUATIONS_SET%GEOMETRY%GEOMETRIC_FIELD,FIELD_U_VARIABLE_TYPE, &
                 & NUMBER_OF_DIMENSIONS,ERR,ERROR,*999)
               IF(EQUATIONS_SET%TYPE==EQUATIONS_SET_MONODOMAIN_EQUATION_TYPE) THEN
-                !Monodomain. Materials field components are 2 plus one for each dimension i.e., Am, Cm and \sigma
-                NUMBER_OF_MATERIALS_COMPONENTS=NUMBER_OF_DIMENSIONS+2
-                DIMENSION_MULTIPLIER=1
+                IF (EQUATIONS_SET%SUBTYPE==EQUATIONS_SET_QUASI_MONODOMAIN_SUBTYPE) THEN 
+                  !Monodomain. Materials field components are 2 plus one for each dimension i.e., Am, Cm,gr and \sigma
+                  NUMBER_OF_MATERIALS_COMPONENTS=NUMBER_OF_DIMENSIONS+3
+                  DIMENSION_MULTIPLIER=1
+                ELSE
+                 !Monodomain. Materials field components are 2 plus one for each dimension i.e., Am, Cm and \sigma
+                  NUMBER_OF_MATERIALS_COMPONENTS=NUMBER_OF_DIMENSIONS+2
+                  DIMENSION_MULTIPLIER=1
+               ENDIF
               ELSE
                 !Bidomain. Materials field components are 2 plus two for each dimension i.e., Am, C, \sigma_i and \sigma_e
                 NUMBER_OF_MATERIALS_COMPONENTS=2*NUMBER_OF_DIMENSIONS+2
@@ -977,6 +1246,11 @@ CONTAINS
               !Now set Cm
               CALL FIELD_COMPONENT_VALUES_INITIALISE(EQUATIONS_MATERIALS%MATERIALS_FIELD,FIELD_U_VARIABLE_TYPE, &
                 & FIELD_VALUES_SET_TYPE,2,0.0025_DP,ERR,ERROR,*999)
+              !Now set gr
+              IF (EQUATIONS_SET%SUBTYPE==EQUATIONS_SET_QUASI_MONODOMAIN_SUBTYPE) THEN 
+                CALL FIELD_COMPONENT_VALUES_INITIALISE(EQUATIONS_MATERIALS%MATERIALS_FIELD,FIELD_U_VARIABLE_TYPE, &
+                  & FIELD_VALUES_SET_TYPE,NUMBER_OF_DIMENSIONS+1,0.0025_DP,ERR,ERROR,*999)
+              ENDIF
               !Now set the sigmas to be 1.0
               DO component_idx=1,NUMBER_OF_DIMENSIONS
                 DO dimension_idx=1,DIMENSION_MULTIPLIER
@@ -1238,7 +1512,7 @@ CONTAINS
       CASE(EQUATIONS_SET_MONODOMAIN_EQUATION_TYPE)        
         SELECT CASE(EQUATIONS_SET%SUBTYPE)
         CASE(EQUATIONS_SET_NO_SUBTYPE,EQUATIONS_SET_1D3D_MONODOMAIN_ELASTICITY_SUBTYPE, &
-          & EQUATIONS_SET_MONODOMAIN_ELASTICITY_W_TITIN_SUBTYPE)
+          & EQUATIONS_SET_MONODOMAIN_ELASTICITY_W_TITIN_SUBTYPE,EQUATIONS_SET_QUASI_MONODOMAIN_SUBTYPE)
           SELECT CASE(SOLUTION_METHOD)
           CASE(EQUATIONS_SET_FEM_SOLUTION_METHOD)
             EQUATIONS_SET%SOLUTION_METHOD=EQUATIONS_SET_FEM_SOLUTION_METHOD
@@ -1350,6 +1624,10 @@ CONTAINS
           EQUATIONS_SET%CLASS=EQUATIONS_SET_BIOELECTRICS_CLASS
           EQUATIONS_SET%TYPE=EQUATIONS_SET_MONODOMAIN_EQUATION_TYPE
           EQUATIONS_SET%SUBTYPE=EQUATIONS_SET_1D3D_MONODOMAIN_ELASTICITY_SUBTYPE
+        CASE(EQUATIONS_SET_QUASI_MONODOMAIN_SUBTYPE)
+          EQUATIONS_SET%CLASS=EQUATIONS_SET_BIOELECTRICS_CLASS
+          EQUATIONS_SET%TYPE=EQUATIONS_SET_MONODOMAIN_EQUATION_TYPE
+          EQUATIONS_SET%SUBTYPE=EQUATIONS_SET_QUASI_MONODOMAIN_SUBTYPE
         CASE(PROBLEM_MONODOMAIN_ELASTICITY_W_TITIN_SUBTYPE)
           EQUATIONS_SET%CLASS=EQUATIONS_SET_BIOELECTRICS_CLASS
           EQUATIONS_SET%TYPE=EQUATIONS_SET_MONODOMAIN_EQUATION_TYPE
@@ -1389,6 +1667,7 @@ CONTAINS
     CALL EXITS("BIODOMAIN_EQUATION_EQUATIONS_SET_SUBTYPE_SET")
     RETURN 1
   END SUBROUTINE BIODOMAIN_EQUATION_EQUATIONS_SET_SUBTYPE_SET
+
 
   !
   !================================================================================================================================
@@ -1623,7 +1902,7 @@ CONTAINS
               CALL SOLVER_DYNAMIC_SCHEME_SET(SOLVER,SOLVER_DYNAMIC_CRANK_NICOLSON_SCHEME,ERR,ERROR,*999)
               CALL SOLVER_DYNAMIC_RESTART_SET(SOLVER,.TRUE.,ERR,ERROR,*999)
               CALL SOLVER_LIBRARY_TYPE_SET(SOLVER,SOLVER_CMISS_LIBRARY,ERR,ERROR,*999)
-            CASE(PROBLEM_MONODOMAIN_STRANG_SPLIT_SUBTYPE)
+            CASE(PROBLEM_MONODOMAIN_STRANG_SPLIT_SUBTYPE,PROBLEM_MONODOMAIN_QUASI_STRANG_SPLIT_SUBTYPE)
               CALL SOLVERS_NUMBER_SET(SOLVERS,3,ERR,ERROR,*999)
               !Set the first solver to be a differential-algebraic equations solver
               NULLIFY(SOLVER)
@@ -1779,6 +2058,7 @@ CONTAINS
             CALL SOLVER_EQUATIONS_LINEARITY_TYPE_SET(SOLVER_EQUATIONS,SOLVER_EQUATIONS_LINEAR,ERR,ERROR,*999)
             CALL SOLVER_EQUATIONS_TIME_DEPENDENCE_TYPE_SET(SOLVER_EQUATIONS,SOLVER_EQUATIONS_STATIC,ERR,ERROR,*999)
             CALL SOLVER_EQUATIONS_SPARSITY_TYPE_SET(SOLVER_EQUATIONS,SOLVER_SPARSE_MATRICES,ERR,ERROR,*999)
+
           CASE DEFAULT
             LOCAL_ERROR="The problem type of "//TRIM(NUMBER_TO_VSTRING(PROBLEM%TYPE,"*",ERR,ERROR))//  &
               & " is invalid for a bioelectric problem class."
@@ -1842,7 +2122,8 @@ CONTAINS
             !Create the CellML equations for the first DAE solver
             CALL SOLVERS_SOLVER_GET(SOLVERS,1,SOLVER,ERR,ERROR,*999)
             CALL CELLML_EQUATIONS_CREATE_START(SOLVER,CELLML_EQUATIONS,ERR,ERROR,*999)
-            IF(PROBLEM%SUBTYPE==PROBLEM_MONODOMAIN_STRANG_SPLIT_SUBTYPE) THEN
+            IF(PROBLEM%SUBTYPE==PROBLEM_MONODOMAIN_STRANG_SPLIT_SUBTYPE .or. &
+               & PROBLEM%SUBTYPE==PROBLEM_MONODOMAIN_STRANG_SPLIT_SUBTYPE) THEN
               !Create the CellML equations for the second DAE solver
               NULLIFY(SOLVER)
               NULLIFY(CELLML_EQUATIONS)
@@ -1877,7 +2158,8 @@ CONTAINS
             CALL SOLVER_CELLML_EQUATIONS_GET(SOLVER,CELLML_EQUATIONS,ERR,ERROR,*999)
             !Finish the CellML equations creation
             CALL CELLML_EQUATIONS_CREATE_FINISH(CELLML_EQUATIONS,ERR,ERROR,*999)
-            IF(PROBLEM%SUBTYPE==PROBLEM_MONODOMAIN_STRANG_SPLIT_SUBTYPE) THEN
+            IF(PROBLEM%SUBTYPE==PROBLEM_MONODOMAIN_STRANG_SPLIT_SUBTYPE .or. &
+               & PROBLEM%SUBTYPE==PROBLEM_MONODOMAIN_STRANG_SPLIT_SUBTYPE) THEN
               !Get the CellML equations for the second DAE solver
               NULLIFY(SOLVER)
               NULLIFY(CELLML_EQUATIONS)
@@ -1957,7 +2239,11 @@ CONTAINS
         CASE(PROBLEM_MONODOMAIN_STRANG_SPLIT_SUBTYPE)
           PROBLEM%CLASS=PROBLEM_BIOELECTRICS_CLASS
           PROBLEM%TYPE=PROBLEM_MONODOMAIN_EQUATION_TYPE
-          PROBLEM%SUBTYPE=PROBLEM_MONODOMAIN_STRANG_SPLIT_SUBTYPE         
+          PROBLEM%SUBTYPE=PROBLEM_MONODOMAIN_STRANG_SPLIT_SUBTYPE
+        CASE(PROBLEM_MONODOMAIN_QUASI_STRANG_SPLIT_SUBTYPE)
+          PROBLEM%CLASS=PROBLEM_BIOELECTRICS_CLASS
+          PROBLEM%TYPE=PROBLEM_MONODOMAIN_EQUATION_TYPE
+          PROBLEM%SUBTYPE=PROBLEM_MONODOMAIN_QUASI_STRANG_SPLIT_SUBTYPE           
         CASE DEFAULT
           LOCAL_ERROR="The specified problem subtype of "//TRIM(NUMBER_TO_VSTRING(PROBLEM_SUBTYPE,"*",ERR,ERROR))// &
             & " is not valid for a monodomain problem type of a bioelectric problem class."
@@ -1972,7 +2258,7 @@ CONTAINS
         CASE(PROBLEM_BIDOMAIN_STRANG_SPLIT_SUBTYPE)
           PROBLEM%CLASS=PROBLEM_BIOELECTRICS_CLASS
           PROBLEM%TYPE=PROBLEM_BIDOMAIN_EQUATION_TYPE
-          PROBLEM%SUBTYPE=PROBLEM_BIDOMAIN_GUDUNOV_SPLIT_SUBTYPE
+          PROBLEM%SUBTYPE=PROBLEM_BIDOMAIN_STRANG_SPLIT_SUBTYPE
         CASE DEFAULT
           LOCAL_ERROR="The specified problem subtype of "//TRIM(NUMBER_TO_VSTRING(PROBLEM_SUBTYPE,"*",ERR,ERROR))// &
             & " is not valid for a bidomain problem type of a bioelectric problem class."
@@ -2091,55 +2377,59 @@ CONTAINS
                   CONDUCTIVITY(nj,nj)=EQUATIONS%INTERPOLATION%MATERIALS_INTERP_POINT(FIELD_U_VARIABLE_TYPE)%PTR%VALUES(nj+2,1)
                 ENDDO !nj
               ENDIF
-              !Compute basis dPhi/dx terms
-              DO nj=1,GEOMETRIC_VARIABLE%NUMBER_OF_COMPONENTS
-                DO ms=1,DEPENDENT_BASIS%NUMBER_OF_ELEMENT_PARAMETERS
-                  DPHIDX(nj,ms)=0.0_DP
-                  DO ni=1,DEPENDENT_BASIS%NUMBER_OF_XI
-                    DPHIDX(nj,ms)=DPHIDX(nj,ms)+ &
-                      & QUADRATURE_SCHEME%GAUSS_BASIS_FNS(ms,PARTIAL_DERIVATIVE_FIRST_DERIVATIVE_MAP(ni),ng)* &
-                      & EQUATIONS%INTERPOLATION%GEOMETRIC_INTERP_POINT_METRICS(FIELD_U_VARIABLE_TYPE)%PTR%DXI_DX(ni,nj)
-                  ENDDO !ni
-                ENDDO !ms
-              ENDDO !nj            
-              !Loop over field components
-              mhs=0          
-              DO mh=1,FIELD_VARIABLE%NUMBER_OF_COMPONENTS
-                !Loop over element rows
-                DO ms=1,DEPENDENT_BASIS%NUMBER_OF_ELEMENT_PARAMETERS
-                  mhs=mhs+1
-                  nhs=0
-                  !Loop over element columns
-                  DO nh=1,FIELD_VARIABLE%NUMBER_OF_COMPONENTS
-                    DO ns=1,DEPENDENT_BASIS%NUMBER_OF_ELEMENT_PARAMETERS
-                      nhs=nhs+1
-                      SUM=0.0_DP
-                      IF(STIFFNESS_MATRIX%UPDATE_MATRIX) THEN
-                        DO ni=1,GEOMETRIC_VARIABLE%NUMBER_OF_COMPONENTS
-                          DO nj=1,GEOMETRIC_VARIABLE%NUMBER_OF_COMPONENTS
-                            SUM=SUM+CONDUCTIVITY(ni,nj)*DPHIDX(ni,mhs)*DPHIDX(nj,nhs)
-                          ENDDO !nj
-                        ENDDO !ni
-                        IF((EQUATIONS%INTERPOLATION%MATERIALS_INTERP_POINT(FIELD_U_VARIABLE_TYPE)%PTR%VALUES(1,1)<ZERO_TOLERANCE)&
-                          & .OR. (EQUATIONS%INTERPOLATION%MATERIALS_INTERP_POINT(FIELD_U_VARIABLE_TYPE)%PTR%VALUES(2,1) &
-                          & <ZERO_TOLERANCE)) THEN
-                          LOCAL_ERROR="The value of the surface area to volume ratio or the capacitance is below zero tolerance"
-                          CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+              IF (EQUATIONS_SET%SUBTYPE==EQUATIONS_SET_QUASI_MONODOMAIN_SUBTYPE) THEN
+              
+              ELSE
+                !Compute basis dPhi/dx terms
+                DO nj=1,GEOMETRIC_VARIABLE%NUMBER_OF_COMPONENTS
+                  DO ms=1,DEPENDENT_BASIS%NUMBER_OF_ELEMENT_PARAMETERS
+                    DPHIDX(nj,ms)=0.0_DP
+                    DO ni=1,DEPENDENT_BASIS%NUMBER_OF_XI
+                      DPHIDX(nj,ms)=DPHIDX(nj,ms)+ &
+                        & QUADRATURE_SCHEME%GAUSS_BASIS_FNS(ms,PARTIAL_DERIVATIVE_FIRST_DERIVATIVE_MAP(ni),ng)* &
+                        & EQUATIONS%INTERPOLATION%GEOMETRIC_INTERP_POINT_METRICS(FIELD_U_VARIABLE_TYPE)%PTR%DXI_DX(ni,nj)
+                    ENDDO !ni
+                  ENDDO !ms
+                ENDDO !nj          
+                !Loop over field components
+                mhs=0          
+                DO mh=1,FIELD_VARIABLE%NUMBER_OF_COMPONENTS
+                  !Loop over element rows
+                  DO ms=1,DEPENDENT_BASIS%NUMBER_OF_ELEMENT_PARAMETERS
+                    mhs=mhs+1
+                    nhs=0
+                    !Loop over element columns
+                    DO nh=1,FIELD_VARIABLE%NUMBER_OF_COMPONENTS
+                      DO ns=1,DEPENDENT_BASIS%NUMBER_OF_ELEMENT_PARAMETERS
+                        nhs=nhs+1
+                        SUM=0.0_DP
+                        IF(STIFFNESS_MATRIX%UPDATE_MATRIX) THEN
+                          DO ni=1,GEOMETRIC_VARIABLE%NUMBER_OF_COMPONENTS
+                            DO nj=1,GEOMETRIC_VARIABLE%NUMBER_OF_COMPONENTS
+                              SUM=SUM+CONDUCTIVITY(ni,nj)*DPHIDX(ni,mhs)*DPHIDX(nj,nhs)
+                            ENDDO !nj
+                          ENDDO !ni
+                          IF((EQUATIONS%INTERPOLATION%MATERIALS_INTERP_POINT(FIELD_U_VARIABLE_TYPE)%PTR%VALUES(1,1)<ZERO_TOLERANCE)&
+                            & .OR. (EQUATIONS%INTERPOLATION%MATERIALS_INTERP_POINT(FIELD_U_VARIABLE_TYPE)%PTR%VALUES(2,1) &
+                            & <ZERO_TOLERANCE)) THEN
+                            LOCAL_ERROR="The value of the surface area to volume ratio or the capacitance is below zero tolerance"
+                            CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+                          ENDIF
+                          STIFFNESS_MATRIX%ELEMENT_MATRIX%MATRIX(mhs,nhs)=STIFFNESS_MATRIX%ELEMENT_MATRIX%MATRIX(mhs,nhs)+SUM*RWG/ &
+                            & EQUATIONS%INTERPOLATION%MATERIALS_INTERP_POINT(FIELD_U_VARIABLE_TYPE)%PTR%VALUES(1,1)/ &
+                            & EQUATIONS%INTERPOLATION%MATERIALS_INTERP_POINT(FIELD_U_VARIABLE_TYPE)%PTR%VALUES(2,1)
                         ENDIF
-                        STIFFNESS_MATRIX%ELEMENT_MATRIX%MATRIX(mhs,nhs)=STIFFNESS_MATRIX%ELEMENT_MATRIX%MATRIX(mhs,nhs)+SUM*RWG/ &
-                          & EQUATIONS%INTERPOLATION%MATERIALS_INTERP_POINT(FIELD_U_VARIABLE_TYPE)%PTR%VALUES(1,1)/ &
-                          & EQUATIONS%INTERPOLATION%MATERIALS_INTERP_POINT(FIELD_U_VARIABLE_TYPE)%PTR%VALUES(2,1)
-                      ENDIF
-                      IF(DAMPING_MATRIX%UPDATE_MATRIX) THEN
-                        DAMPING_MATRIX%ELEMENT_MATRIX%MATRIX(mhs,nhs)=DAMPING_MATRIX%ELEMENT_MATRIX%MATRIX(mhs,nhs)+ &
-                          & QUADRATURE_SCHEME%GAUSS_BASIS_FNS(ms,NO_PART_DERIV,ng)* &
-                          & QUADRATURE_SCHEME%GAUSS_BASIS_FNS(ns,NO_PART_DERIV,ng)*RWG
-                      ENDIF
-                    ENDDO !ns
-                  ENDDO !nh
-                  IF(RHS_VECTOR%UPDATE_VECTOR) RHS_VECTOR%ELEMENT_VECTOR%VECTOR(mhs)=0.0_DP
-                ENDDO !ms
-              ENDDO !mh
+                        IF(DAMPING_MATRIX%UPDATE_MATRIX) THEN
+                          DAMPING_MATRIX%ELEMENT_MATRIX%MATRIX(mhs,nhs)=DAMPING_MATRIX%ELEMENT_MATRIX%MATRIX(mhs,nhs)+ &
+                            & QUADRATURE_SCHEME%GAUSS_BASIS_FNS(ms,NO_PART_DERIV,ng)* &
+                            & QUADRATURE_SCHEME%GAUSS_BASIS_FNS(ns,NO_PART_DERIV,ng)*RWG
+                        ENDIF
+                      ENDDO !ns
+                    ENDDO !nh
+                    IF(RHS_VECTOR%UPDATE_VECTOR) RHS_VECTOR%ELEMENT_VECTOR%VECTOR(mhs)=0.0_DP
+                  ENDDO !ms
+                ENDDO !mh
+              ENDIF 
             ENDDO !ng
           ENDIF
         CASE(EQUATIONS_SET_BIDOMAIN_EQUATION_TYPE)
