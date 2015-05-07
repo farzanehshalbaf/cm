@@ -2633,7 +2633,7 @@ CONTAINS
                         Vr= EQUATIONS%INTERPOLATION%MATERIALS_INTERP_POINT(FIELD_U_VARIABLE_TYPE)%PTR%VALUES & 
                               & (GEOMETRIC_VARIABLE%NUMBER_OF_COMPONENTS+4,1)
                         Ve= EQUATIONS%INTERPOLATION%INDEPENDENT_INTERP_POINT(FIELD_U_VARIABLE_TYPE)%PTR%VALUES(1,NO_PART_DERIV)
-                        SUM=(-1.0_DP*gr/Cm)*(Ve-Vr)
+                        SUM=(gr/Cm)*(Ve-Vr)
                         SOURCE_VECTOR%ELEMENT_VECTOR%VECTOR(mhs)=SOURCE_VECTOR%ELEMENT_VECTOR%VECTOR(mhs)+ & !This needs to changed to the source vector
                           & SUM*QUADRATURE_SCHEME%GAUSS_BASIS_FNS(ms,NO_PART_DERIV,ng)*RWG
                       ENDIF
