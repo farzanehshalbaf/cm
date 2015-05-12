@@ -161,8 +161,10 @@ CONTAINS
           IF(ASSOCIATED(PROBLEM)) THEN
             SELECT CASE(PROBLEM%SUBTYPE)
             CASE (PROBLEM_MONODOMAIN_QUASI_STRANG_SPLIT_SUBTYPE)
-              ITERATION_PHASE=ITERATION/500
-            !  IF (ITERATION_PHASE>0 .OR. ITERATION==0) THEN
+!                 to read monophasic stimulation
+              if (ITERATION<100) ITERATION_PHASE=0
+              if (ITERATION>100 .and. ITERATION<200) ITERATION_PHASE=1
+              if (ITERATION>200) ITERATION_PHASE=0
                 NULLIFY(SOLVERS)
                 NULLIFY(SOLVER)
                 !Get the solver. For Biodomain problems of any split the 2nd solver will contain the dependent field equation set
@@ -246,7 +248,6 @@ CONTAINS
                 ELSE
                   CALL FLAG_ERROR("Solver equations are not associated.",ERR,ERROR,*999)
                 END IF
-             ! ENDIF  iteration phase
             CASE (PROBLEM_MONODOMAIN_STRANG_SPLIT_SUBTYPE)
               ! DO NOTHING
             CASE DEFAULT
@@ -361,12 +362,12 @@ CONTAINS
                           & "_"//TRIM(NUMBER_TO_VSTRING(TIME_LOOP%GLOBAL_ITERATION_NUMBER,"*",ERR,ERROR))
                       ENDIF
                       METHOD="FORTRAN"
-                     ! CURRENT_LOOP_ITERATION=PARENT_LOOP%TIME_LOOP%ITERATION_NUMBER
-                   !   IF(MOD((TIME_LOOP%GLOBAL_ITERATION_NUMBER),10)==0 .OR. TIME_LOOP%GLOBAL_ITERATION_NUMBER==0) THEN  ! WRITE OUT EACH 10 TIMESTEP
+                      
+                      IF(MOD((TIME_LOOP%GLOBAL_ITERATION_NUMBER),100)==0 .OR. TIME_LOOP%GLOBAL_ITERATION_NUMBER==0) THEN  ! WRITE OUT EACH 10 TIMESTEP
                         CALL WRITE_STRING(GENERAL_OUTPUT_TYPE,"  exporting nodes of time  ",ERR,ERROR,*999)
                         WRITE(*,*) TIME_LOOP%GLOBAL_ITERATION_NUMBER
                         CALL FIELD_IO_NODES_EXPORT(DEPENDENT_REGION%FIELDS,FILENAME,METHOD,ERR,ERROR,*999)
-                    !  ENDIF
+                      ENDIF
                       IF(CURRENT_LOOP_ITERATION==0) THEN
                         CALL WRITE_STRING(GENERAL_OUTPUT_TYPE,"  Now export elements... ",ERR,ERROR,*999)
                         CALL FIELD_IO_ELEMENTS_EXPORT(DEPENDENT_REGION%FIELDS,FILENAME,METHOD,ERR,ERROR,*999)
@@ -2601,7 +2602,7 @@ CONTAINS
                         gr= EQUATIONS%INTERPOLATION%MATERIALS_INTERP_POINT(FIELD_U_VARIABLE_TYPE)%PTR%VALUES & 
                             & (GEOMETRIC_VARIABLE%NUMBER_OF_COMPONENTS+3,1)
                         Cm= EQUATIONS%INTERPOLATION%MATERIALS_INTERP_POINT(FIELD_U_VARIABLE_TYPE)%PTR%VALUES(2,1)
-                        K_variable=-1.0_DP*gr/Cm
+                        K_variable=gr/Cm
                         IF (ASSOCIATED(STIFFNESS_MATRIX)) THEN 
                           IF(STIFFNESS_MATRIX%UPDATE_MATRIX) THEN
                             STIFFNESS_MATRIX%ELEMENT_MATRIX%MATRIX(mhs,nhs)=STIFFNESS_MATRIX%ELEMENT_MATRIX%MATRIX(mhs,nhs)+ &
@@ -2633,7 +2634,7 @@ CONTAINS
                         Vr= EQUATIONS%INTERPOLATION%MATERIALS_INTERP_POINT(FIELD_U_VARIABLE_TYPE)%PTR%VALUES & 
                               & (GEOMETRIC_VARIABLE%NUMBER_OF_COMPONENTS+4,1)
                         Ve= EQUATIONS%INTERPOLATION%INDEPENDENT_INTERP_POINT(FIELD_U_VARIABLE_TYPE)%PTR%VALUES(1,NO_PART_DERIV)
-                        SUM=(gr/Cm)*(Ve-Vr)
+                        SUM=(gr/Cm)*(Vr-Ve)
                         SOURCE_VECTOR%ELEMENT_VECTOR%VECTOR(mhs)=SOURCE_VECTOR%ELEMENT_VECTOR%VECTOR(mhs)+ & !This needs to changed to the source vector
                           & SUM*QUADRATURE_SCHEME%GAUSS_BASIS_FNS(ms,NO_PART_DERIV,ng)*RWG
                       ENDIF
